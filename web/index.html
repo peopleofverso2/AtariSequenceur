@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>STEP·SEQ — Séquenceur (hommage Atari ST / YM2149)</title>
+<style>
+  /* ============================================================
+     STEP·SEQ — esthétique GEM (Atari ST) : chrome gris bizeauté,
+     barre de titre rayée, "écran" CRT sombre, grille néon chiptune.
+     24 pistes, longueur variable, résolution réglable.
+     ============================================================ */
+  :root{
+    --desk:#3a4c4a;
+    --desk-dot:#2d3c3b;
+    --face:#c2c2c2;
+    --face-dk:#9a9a9a;
+    --hi:#ffffff;
+    --sh:#565656;
+    --ink:#0b0b0b;
+    --screen:#0d0a18;
+    --grid-off:#171327;
+    --grid-line:#080611;
+    --beam:#fff6d2;
+    --mono:"DejaVu Sans Mono","Liberation Mono","Consolas","Courier New",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--mono);
+    background:var(--desk);
+    background-image:radial-gradient(var(--desk-dot) 1px,transparent 1.4px);
+    background-size:6px 6px;
+    color:var(--ink);
+    display:flex;align-items:center;justify-content:center;
+    padding:18px;
+    -webkit-font-smoothing:none;
+  }
+
+  /* ---- fenêtre GEM ---- */
+  .win{
+    width:min(960px,100%);
+    background:var(--face);
+    border:2px solid;
+    border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    box-shadow:0 0 0 1px var(--ink), 8px 10px 0 rgba(0,0,0,.45);
+  }
+  .titlebar{
+    display:flex;align-items:center;gap:6px;
+    padding:3px;
+    border-bottom:2px solid var(--sh);
+    background:
+      repeating-linear-gradient(0deg,var(--ink) 0 1px,transparent 1px 3px),
+      var(--hi);
+  }
+  .closebox{
+    width:19px;height:19px;flex:none;
+    background:var(--face);
+    border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+  }
+  .closebox::after{content:"";width:8px;height:8px;background:var(--ink)}
+  .closebox:active{border-color:var(--sh) var(--hi) var(--hi) var(--sh)}
+  .title{flex:1;text-align:center}
+  .title span{
+    background:var(--hi);padding:2px 14px;
+    font-weight:700;font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;
+  }
+
+  /* ---- barre d'outils ---- */
+  .toolbar{
+    display:flex;flex-wrap:wrap;align-items:center;gap:6px;
+    padding:8px;border-bottom:2px solid var(--sh);
+  }
+  .btn{
+    font-family:var(--mono);font-size:11px;font-weight:700;
+    letter-spacing:.09em;text-transform:uppercase;
+    background:var(--face);color:var(--ink);
+    border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    padding:6px 11px;cursor:pointer;white-space:nowrap;min-height:30px;
+  }
+  .btn:active,.btn[aria-pressed="true"]{
+    border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    background:var(--face-dk);
+  }
+  .btn.go[aria-pressed="true"]{background:#2f8f4f;color:#fff}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .sep{width:2px;align-self:stretch;background:var(--sh);
+       box-shadow:1px 0 0 var(--hi);margin:0 3px}
+  .field{
+    display:flex;align-items:center;gap:6px;
+    font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  }
+  .readout{
+    background:var(--screen);color:#ffe24d;
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    padding:3px 8px;min-width:46px;text-align:center;
+    font-weight:700;font-size:13px;letter-spacing:.06em;
+  }
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;height:18px;width:88px;
+    background:var(--screen);
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:12px;height:14px;
+    background:var(--face);border:2px solid;
+    border-color:var(--hi) var(--sh) var(--sh) var(--hi);cursor:ew-resize;
+  }
+  input[type=range]::-moz-range-thumb{
+    width:12px;height:14px;background:var(--face);border:2px solid var(--sh);
+    cursor:ew-resize;border-radius:0;
+  }
+
+  /* ---- écran CRT ---- */
+  .screen-wrap{padding:10px}
+  .screen{
+    background:var(--screen);
+    border:3px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    border-radius:7px;
+    padding:12px;
+    overflow:auto;
+    max-height:58vh;
+    position:relative;
+    box-shadow:inset 0 0 60px rgba(0,0,0,.9);
+    animation:powerOn .55s ease-out;
+  }
+  @keyframes powerOn{
+    0%{filter:brightness(3) contrast(.2)}
+    60%{filter:brightness(1.6)}
+    100%{filter:none}
+  }
+
+  /* ---- matrice ---- */
+  .matrix{
+    --label-w:122px;
+    display:grid;
+    gap:3px;
+  }
+  .hcell{
+    position:sticky;top:0;z-index:4;
+    background:var(--screen);
+    font-size:9px;font-weight:700;color:#6f6a8c;text-align:center;
+    padding:3px 0 4px;letter-spacing:.04em;min-height:15px;
+  }
+  .hcell.beat{color:var(--beam)}
+  .hcell.head-on{color:var(--beam);text-shadow:0 0 8px var(--beam)}
+  .corner{
+    grid-column:1;position:sticky;top:0;left:0;z-index:5;
+    background:var(--screen);
+  }
+
+  .label{
+    position:sticky;left:0;z-index:3;
+    background:linear-gradient(var(--grid-off),#0f0c1c);
+    border-left:4px solid var(--lc,#fff);
+    display:flex;align-items:center;gap:6px;
+    padding:0 8px;height:36px;cursor:pointer;user-select:none;
+  }
+  .label .name{
+    font-size:10px;font-weight:700;letter-spacing:.04em;color:#d7d3ec;
+    flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .label .note{font-size:9px;font-weight:700;color:var(--lc,#888);flex:none}
+  .label.muted .name,.label.muted .note{color:#56506f}
+  .label.muted .name{text-decoration:line-through}
+  .led{
+    width:10px;height:10px;flex:none;border-radius:50%;
+    background:var(--lc,#fff);
+    box-shadow:0 0 8px var(--lc,#fff),inset 0 0 0 2px rgba(0,0,0,.35);
+  }
+  .label.muted .led{background:#2a2740;box-shadow:inset 0 0 0 2px rgba(0,0,0,.5)}
+
+  .cell{
+    min-height:34px;
+    background:var(--grid-off);
+    border:1px solid var(--grid-line);
+    cursor:ns-resize;touch-action:none;position:relative;overflow:hidden;
+  }
+  .cell.g-start{box-shadow:inset 2px 0 0 #322c52}
+  /* pad allumé : barre de couleur dont la HAUTEUR encode la note ;
+     les lignes verticales découpent le pas en --n sous-pas (croches…) */
+  .cell.on{
+    background:
+      repeating-linear-gradient(to right,
+        rgba(0,0,0,0) 0,
+        rgba(0,0,0,0) calc(100%/var(--n,1) - var(--lw,0px)),
+        rgba(0,0,0,.62) calc(100%/var(--n,1) - var(--lw,0px)),
+        rgba(0,0,0,.62) calc(100%/var(--n,1))),
+      linear-gradient(to top,
+        var(--lc) 0, var(--lc) var(--h,100%), rgba(0,0,0,0) var(--h,100%));
+    box-shadow:0 0 9px -3px var(--lc);
+  }
+  .cell.on::after{                     /* liseré lumineux au sommet de la barre */
+    content:"";position:absolute;left:0;right:0;height:2px;
+    bottom:calc(var(--h,100%) - 2px);
+    background:rgba(255,255,255,.9);
+    box-shadow:0 0 6px 1px var(--lc);
+  }
+  .cell.on::before{                    /* nom de note affiché sur le pad */
+    content:attr(data-note);
+    position:absolute;left:0;right:0;top:50%;z-index:1;
+    transform:translateY(-50%);
+    text-align:center;letter-spacing:.01em;
+    font:700 8px/1 var(--mono);
+    color:#fff;
+    text-shadow:0 0 2px #000,0 1px 2px #000,0 0 3px #000;
+  }
+  .cell.beam{
+    background:linear-gradient(rgba(255,246,210,.22),rgba(255,246,210,.05));
+  }
+  .cell.on.beam{filter:brightness(1.55) saturate(1.15)}
+  .cell.hover{outline:2px solid rgba(255,255,255,.6);outline-offset:-2px;z-index:1}
+  .cell.rec{outline:2px solid #ff5a6e;outline-offset:-2px;z-index:2}
+
+  /* indicateur d'enregistrement MIDI dans le transport */
+  .recdot{
+    font:700 11px/1 var(--mono);color:#ff5a6e;letter-spacing:.06em;
+    padding:0 6px;align-self:center;
+    text-shadow:0 0 8px rgba(255,90,110,.7);
+    animation:recpulse 1s steps(1,end) infinite;
+  }
+  .recdot[hidden]{display:none}
+  @keyframes recpulse{50%{opacity:.25}}
+
+  /* ---- pied : banque + auth ---- */
+  .footer{
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+    padding:8px;border-top:2px solid var(--hi);
+  }
+  .text-input{
+    font-family:var(--mono);font-size:12px;font-weight:700;
+    letter-spacing:.05em;text-transform:uppercase;
+    background:var(--hi);color:var(--ink);
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    padding:5px 8px;
+  }
+  #pname{width:160px}
+  .spacer{flex:1}
+  .status{
+    font-size:10px;font-weight:700;letter-spacing:.05em;
+    background:var(--screen);padding:5px 9px;
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    color:#6f6a8c;
+  }
+  .status.online{color:#5cff9b}
+
+  /* ---- dialogues GEM ---- */
+  .overlay{
+    position:fixed;inset:0;background:rgba(10,14,14,.55);
+    display:none;align-items:center;justify-content:center;padding:18px;z-index:50;
+  }
+  .overlay.show{display:flex}
+  .dialog{
+    width:min(440px,100%);background:var(--face);
+    border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    box-shadow:0 0 0 1px var(--ink),8px 10px 0 rgba(0,0,0,.45);
+  }
+  .dialog .titlebar{padding:3px}
+  .dlg-body{padding:14px;display:flex;flex-direction:column;gap:10px}
+  .dlg-body p{font-size:11px;line-height:1.5}
+  .dlg-row{display:flex;gap:8px;align-items:center}
+  .dlg-row label{font-size:10px;font-weight:700;width:64px;text-transform:uppercase}
+  .dlg-row .text-input{flex:1}
+  .dlg-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+  .banklist{
+    max-height:240px;overflow-y:auto;
+    background:var(--screen);
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+  }
+  .bankrow{
+    display:flex;align-items:center;gap:8px;padding:7px 9px;
+    border-bottom:1px solid #1d1830;
+  }
+  .bankrow .bn{flex:1;color:#d7d3ec;font-size:11px;font-weight:700;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bankrow .bm{color:#6f6a8c;font-size:10px}
+  .bank-empty{padding:18px;text-align:center;color:#6f6a8c;font-size:11px}
+  .msg{font-size:10px;font-weight:700;min-height:13px}
+  .msg.err{color:#c0392b}.msg.ok{color:#1e7a3c}
+
+  /* cases à cocher + menu déroulant GEM */
+  .chk-row{display:flex;flex-wrap:wrap;gap:14px}
+  .chk{display:flex;align-items:center;gap:7px;cursor:pointer;
+    font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+  .chk input{
+    -webkit-appearance:none;appearance:none;
+    width:17px;height:17px;flex:none;margin:0;cursor:pointer;
+    background:var(--hi);display:grid;place-items:center;
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+  }
+  .chk input:checked::after{content:"\2715";font-size:12px;font-weight:700;color:var(--ink)}
+  .chk input:disabled{opacity:.45;cursor:not-allowed}
+  .gem-select{
+    font-family:var(--mono);font-size:11px;font-weight:700;min-width:0;
+    background:var(--hi);color:var(--ink);padding:4px 6px;
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+  }
+
+  /* dialogue Voix */
+  .voicelist{display:flex;flex-direction:column;gap:6px;
+    max-height:54vh;overflow-y:auto}
+  .voicerow{
+    display:flex;align-items:center;gap:7px;
+    background:var(--screen);padding:6px 8px;
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+  }
+  .voicerow .vchip{
+    width:12px;height:12px;flex:none;background:var(--lc,#fff);
+    box-shadow:0 0 8px var(--lc,#fff);
+  }
+  .voicerow .vnum{font-size:9px;font-weight:700;color:#6f6a8c;
+    width:20px;flex:none;text-align:right}
+  .voicerow .gem-select{flex:1}
+  .voicerow .btn{padding:5px 9px;min-height:26px}
+
+  /* infobulle de hauteur (pendant le réglage d'un pad) */
+  #tip{
+    position:fixed;z-index:60;pointer-events:none;display:none;
+    background:var(--screen);color:var(--beam);
+    border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    font:700 11px/1 var(--mono);padding:4px 8px;letter-spacing:.06em;
+  }
+  #tip.show{display:block}
+
+  @media(max-width:560px){
+    body{padding:6px}
+    .title span{padding:2px 8px;letter-spacing:.08em}
+  }
+</style>
+</head>
+<body>
+
+<main class="win" role="application" aria-label="Séquenceur pas-à-pas">
+  <div class="titlebar">
+    <div class="closebox" title="GEM" aria-hidden="true"></div>
+    <div class="title"><span>STEP·SEQ — 1040 / YM2149</span></div>
+    <div class="closebox" title="GEM" aria-hidden="true"></div>
+  </div>
+
+  <!-- transport -->
+  <div class="toolbar">
+    <button class="btn go" id="play" aria-pressed="false">&#9654; Play</button>
+    <button class="btn" id="stop">&#9632; Stop</button>
+    <span class="recdot" id="recDot" hidden>&#9679;&nbsp;REC</span>
+    <div class="sep"></div>
+    <div class="field">Tempo
+      <button class="btn" id="bpmDown" aria-label="tempo -">&#9664;</button>
+      <span class="readout" id="bpmOut">120</span>
+      <button class="btn" id="bpmUp" aria-label="tempo +">&#9654;</button>
+    </div>
+    <div class="field">Swing
+      <input type="range" id="swing" min="0" max="75" value="0">
+    </div>
+    <div class="field">Vol
+      <input type="range" id="vol" min="0" max="100" value="72">
+    </div>
+    <div class="sep"></div>
+    <div class="field">Pas
+      <button class="btn" id="lenDown" aria-label="longueur -">&#9664;</button>
+      <span class="readout" id="lenOut">16</span>
+      <button class="btn" id="lenUp" aria-label="longueur +">&#9654;</button>
+    </div>
+    <div class="field">Grille
+      <select class="gem-select" id="resSel"></select>
+    </div>
+    <div class="sep"></div>
+    <button class="btn" id="rand">Random</button>
+    <button class="btn" id="clear">Clear</button>
+  </div>
+
+  <!-- écran / grille -->
+  <div class="screen-wrap">
+    <div class="screen">
+      <div class="matrix" id="matrix"></div>
+    </div>
+  </div>
+
+  <!-- banque + auth -->
+  <div class="footer">
+    <input class="text-input" id="pname" maxlength="60" value="PATTERN 01"
+           aria-label="nom du pattern">
+    <button class="btn" id="save">Save</button>
+    <button class="btn" id="bank">Bank</button>
+    <button class="btn" id="voiceBtn">Voix</button>
+    <button class="btn" id="midiBtn">MIDI</button>
+    <div class="spacer"></div>
+    <span class="status" id="status">Hors-ligne</span>
+    <button class="btn" id="auth">Login</button>
+  </div>
+</main>
+
+<div id="tip"></div>
+
+<!-- dialogue : banque -->
+<div class="overlay" id="bankOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span id="bankTitle">Banque locale</span></div></div>
+    <div class="dlg-body">
+      <div class="banklist" id="banklist"></div>
+      <div class="msg" id="bankMsg"></div>
+      <div class="dlg-actions">
+        <button class="btn" data-close="bankOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : connexion -->
+<div class="overlay" id="authOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span>Connexion Supabase</span></div></div>
+    <div class="dlg-body">
+      <p>Connecte-toi pour stocker tes patterns dans le cloud (Supabase).
+         Sans connexion, la banque reste locale à ce navigateur.</p>
+      <div class="dlg-row"><label for="email">E-mail</label>
+        <input class="text-input" id="email" type="email" autocomplete="email"></div>
+      <div class="dlg-row"><label for="pass">Mot&nbsp;de&nbsp;passe</label>
+        <input class="text-input" id="pass" type="password" autocomplete="current-password"></div>
+      <div class="msg" id="authMsg"></div>
+      <div class="dlg-actions">
+        <button class="btn" id="doSignup">Créer un compte</button>
+        <button class="btn go" id="doLogin" aria-pressed="true">Se connecter</button>
+        <button class="btn" data-close="authOverlay">Annuler</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : voix (instrument + hauteur par piste) -->
+<div class="overlay" id="voiceOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span>Voix &amp; Hauteurs</span></div></div>
+    <div class="dlg-body">
+      <div class="voicelist" id="voicelist"></div>
+      <p>L'instrument définit le timbre. La hauteur choisie ici est la
+         <b>note par défaut</b> des nouveaux pas ; chaque pad se règle ensuite
+         dans la grille — en le tirant verticalement, ou avec ↑/↓ au survol.
+         <b>Clic droit</b> (ou ←/→) <b>subdivise</b> un pas en 2-4 répétitions
+         pour jouer des croches ou des roulements.
+         ▶ écoute la voix. Les 24 pistes se répartissent sur 16 canaux MIDI.</p>
+      <div class="dlg-actions">
+        <button class="btn" data-close="voiceOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : MIDI -->
+<div class="overlay" id="midiOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span>MIDI</span></div></div>
+    <div class="dlg-body">
+      <div class="dlg-row"><label for="midiPort">Sortie</label>
+        <select class="gem-select" id="midiPort" style="flex:1">
+          <option value="">— aucune sortie —</option>
+        </select></div>
+      <div class="chk-row">
+        <label class="chk"><input type="checkbox" id="midiNotes">Notes</label>
+        <label class="chk"><input type="checkbox" id="midiClock">Horloge</label>
+        <label class="chk"><input type="checkbox" id="midiAudio" checked>Son interne</label>
+      </div>
+      <div class="chk-row">
+        <label class="chk"><input type="checkbox" id="midiIn">Entrée MIDI</label>
+        <label class="chk"><input type="checkbox" id="midiRec">Enregistrer</label>
+      </div>
+      <div class="msg" id="midiInMsg"></div>
+      <p>Chaque piste émet sa note sur un canal MIDI (les 24 pistes sont
+         réparties sur les 16 canaux). L'option Horloge émet une
+         MIDI&nbsp;Clock 24&nbsp;ppqn + Start/Stop. L'export <b>.mid</b>
+         reprend la longueur et la résolution courantes.</p>
+      <p>Avec <b>Entrée MIDI</b>, un clavier USB joue la voix de la piste
+         survolée ; si un pad est sous le curseur, la note jouée y est inscrite.
+         <b>Enregistrer</b> + lecture en cours : chaque note se cale sur le pas
+         le plus proche du curseur de lecture, sur la piste survolée. Les
+         touches hors de l'ambitus sont repliées à l'octave.</p>
+      <div class="msg" id="midiMsg"></div>
+      <div class="dlg-actions">
+        <button class="btn" id="exportMidi">Exporter .mid</button>
+        <button class="btn" data-close="midiOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- supabase-js : optionnel, échec silencieux si CDN injoignable -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
+        onerror="window.__sbDown=true"></script>
+<script>
+"use strict";
+/* =================================================================
+   1. ÉTAT & CONSTANTES
+   ================================================================= */
+const TRACK_COUNT = 24;
+const LEN_MIN = 4, LEN_MAX = 128;
+
+// résolution = nombre de pas par noire (quarter note)
+const RES_OPTIONS = [
+  {v:2,  name:"Croche · 1/8"},
+  {v:4,  name:"Double · 1/16"},
+  {v:8,  name:"Triple · 1/32"},
+  {v:16, name:"Quadruple · 1/64"},
+];
+
+// 24 pistes, ids stables t1..t24, couleur générée sur la roue chromatique
+const TRACKS = Array.from({length:TRACK_COUNT},(_,i)=>({
+  id:"t"+(i+1),
+  color:`hsl(${Math.round(i*360/TRACK_COUNT)} 82% 64%)`,
+}));
+
+// kit par défaut (rotation) + hauteur MIDI naturelle de chaque instrument
+const KIT = ["kick","snare","hat","open","blip","bass","tom","clap","lead","pluck"];
+const INST_DEFAULT_PITCH = {
+  kick:36, snare:57, hat:72, open:72, blip:83, bass:45,
+  tom:48,  clap:60,  lead:72, pluck:67,
+};
+// alias de rétro-compatibilité : anciens patterns (6 pistes nommées)
+const LEGACY_ID = {t1:"kick",t2:"snare",t3:"hat",t4:"open",t5:"blip",t6:"bass"};
+
+const state = {bpm:120, swing:0, playing:false, name:"PATTERN 01",
+               length:16, res:4, grid:{}, subdiv:{}, mutes:{}, voices:{}};
+TRACKS.forEach((t,i)=>{
+  state.grid[t.id]=new Array(state.length).fill(0);
+  state.subdiv[t.id]=new Array(state.length).fill(1);   // 1-4 retriggers per step
+  state.mutes[t.id]=false;
+  const inst=KIT[i%KIT.length];
+  state.voices[t.id]={inst, pitch:INST_DEFAULT_PITCH[inst]};
+});
+
+const $ = s=>document.querySelector(s);
+
+/* =================================================================
+   2. MOTEUR AUDIO  (synthèse chiptune façon YM2149 / POKEY)
+   ================================================================= */
+let ac=null, master=null, noise=null;
+
+function ensureAudio(){
+  if(ac) return;
+  ac = new (window.AudioContext||window.webkitAudioContext)();
+  master = ac.createGain();
+  master.gain.value = +$("#vol").value/100;
+  master.connect(ac.destination);
+  const buf = ac.createBuffer(1, ac.sampleRate*0.5, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+  noise = buf;
+}
+function resumeAudio(){ if(ac && ac.state==="suspended") ac.resume(); }
+
+function env(node,t,peak,dur){
+  node.gain.setValueAtTime(0.0001,t);
+  node.gain.linearRampToValueAtTime(peak,t+0.004);
+  node.gain.exponentialRampToValueAtTime(0.001,t+dur);
+}
+function osc(type,freq,t){
+  const o=ac.createOscillator(); o.type=type;
+  o.frequency.setValueAtTime(freq,t); return o;
+}
+function noiseSrc(){ const n=ac.createBufferSource(); n.buffer=noise; return n; }
+
+/* --- hauteur : note MIDI <-> fréquence -------------------------- */
+const NOTE_NAMES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const PITCH_MIN=24, PITCH_MAX=84;            // C1 .. C6
+const noteName=m=>NOTE_NAMES[((m%12)+12)%12]+(Math.floor(m/12)-1);
+const noteFreq=m=>440*Math.pow(2,(m-69)/12);
+
+/* --- instruments : chaque play(t,f) reçoit une fréquence en Hz --- */
+function iKick(t,f){
+  const o=osc("square",f*3.4,t), g=ac.createGain();
+  o.frequency.exponentialRampToValueAtTime(Math.max(20,f),t+0.13);
+  g.gain.setValueAtTime(0.9,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.21);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.23);
+}
+function iSnare(t,f){
+  const n=noiseSrc(), nf=ac.createBiquadFilter(), ng=ac.createGain();
+  nf.type="highpass"; nf.frequency.value=1300;
+  ng.gain.setValueAtTime(0.7,t);
+  ng.gain.exponentialRampToValueAtTime(0.001,t+0.16);
+  n.connect(nf); nf.connect(ng); ng.connect(master); n.start(t); n.stop(t+0.18);
+  const o=osc("triangle",f,t), og=ac.createGain();
+  og.gain.setValueAtTime(0.45,t);
+  og.gain.exponentialRampToValueAtTime(0.001,t+0.09);
+  o.connect(og); og.connect(master); o.start(t); o.stop(t+0.1);
+}
+function iHat(t,f,open){
+  const dur=open?0.30:0.05;
+  const n=noiseSrc(), flt=ac.createBiquadFilter(), g=ac.createGain();
+  flt.type="highpass";
+  flt.frequency.value=Math.min(14000,Math.max(800,f*14));   // la note règle l'éclat
+  g.gain.setValueAtTime(open?0.36:0.5,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  n.connect(flt); flt.connect(g); g.connect(master); n.start(t); n.stop(t+dur+0.02);
+}
+function iTom(t,f){
+  const o=osc("square",f*1.5,t), g=ac.createGain();
+  o.frequency.exponentialRampToValueAtTime(Math.max(20,f),t+0.18);
+  g.gain.setValueAtTime(0.7,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.26);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.28);
+}
+function iClap(t,f){
+  const flt=ac.createBiquadFilter(); flt.type="bandpass";
+  flt.frequency.value=Math.min(8000,f*2.4); flt.Q.value=1.2;
+  flt.connect(master);
+  [0,0.012,0.024].forEach((d,i)=>{                          // trois micro-éclats
+    const n=noiseSrc(), g=ac.createGain();
+    g.gain.setValueAtTime(0.5-i*0.12,t+d);
+    g.gain.exponentialRampToValueAtTime(0.001,t+d+0.10);
+    n.connect(g); g.connect(flt); n.start(t+d); n.stop(t+d+0.12);
+  });
+}
+function iBlip(t,f){
+  const o=osc("square",f,t), g=ac.createGain();
+  o.frequency.setValueAtTime(f*1.334,t+0.035);   // mini arpège 8-bit
+  env(g,t,0.32,0.13);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.14);
+}
+function iBass(t,f){
+  const o=osc("square",f,t), g=ac.createGain();
+  env(g,t,0.5,0.21);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.23);
+}
+function iLead(t,f){
+  const o=osc("sawtooth",f,t), g=ac.createGain();
+  env(g,t,0.26,0.20);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.22);
+}
+function iPluck(t,f){
+  const o=osc("triangle",f,t), g=ac.createGain();
+  o.frequency.setValueAtTime(f*2,t);
+  o.frequency.exponentialRampToValueAtTime(f,t+0.04);
+  env(g,t,0.5,0.12);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.14);
+}
+/* catalogue : drum=true -> percussion (la hauteur "accorde" le timbre) */
+const INSTRUMENTS = {
+  kick: {name:"KICK",  drum:true,  play:iKick},
+  snare:{name:"SNARE", drum:true,  play:iSnare},
+  hat:  {name:"HAT",   drum:true,  play:(t,f)=>iHat(t,f,false)},
+  open: {name:"OPEN",  drum:true,  play:(t,f)=>iHat(t,f,true)},
+  tom:  {name:"TOM",   drum:true,  play:iTom},
+  clap: {name:"CLAP",  drum:true,  play:iClap},
+  blip: {name:"BLIP",  drum:false, play:iBlip},
+  bass: {name:"BASS",  drum:false, play:iBass},
+  lead: {name:"LEAD",  drum:false, play:iLead},
+  pluck:{name:"PLUCK", drum:false, play:iPluck},
+};
+const INST_KEYS = Object.keys(INSTRUMENTS);
+
+function trigger(id,t,pitch){
+  INSTRUMENTS[state.voices[id].inst].play(t, noteFreq(pitch));
+}
+
+/* =================================================================
+   3. MIDI — sortie Web MIDI, horloge 24 ppqn, export .mid
+   ================================================================= */
+/* Chaque piste sort sur son canal (index piste % 16) et envoie la
+   hauteur réglée pour la piste.                                     */
+const MIDI_CHANNELS = Array.from({length:16},(_,i)=>i);
+const midiCfg = {audio:true, notesOut:false, clockOut:false, input:false, rec:false};
+let midiAccess=null, midiOut=null, midiInit=false;
+let midiInTrack=TRACKS[0].id;            // piste cible du jeu live MIDI
+
+const midiSupported = ()=> !!navigator.requestMIDIAccess;
+
+async function initMidi(){
+  if(midiInit) return;
+  midiInit=true;
+  if(!midiSupported()) return;             // Safari : pas de Web MIDI
+  try{
+    midiAccess = await navigator.requestMIDIAccess({sysex:false});
+    midiAccess.onstatechange = ()=>{ listMidiOuts(); refreshMidiInputs(); };
+  }catch(_){ midiAccess=null; }
+}
+function midiOutputs(){
+  return midiAccess ? [...midiAccess.outputs.values()] : [];
+}
+function listMidiOuts(){
+  const sel=$("#midiPort"); if(!sel) return;
+  const prev = midiOut ? midiOut.id : "";
+  const outs = midiOutputs();
+  sel.innerHTML="";
+  if(!outs.length){
+    sel.innerHTML='<option value="">— aucune sortie —</option>';
+    midiOut=null; return;
+  }
+  outs.forEach(o=>{
+    const opt=document.createElement("option");
+    opt.value=o.id; opt.textContent=o.name; sel.appendChild(opt);
+  });
+  midiOut = outs.find(o=>o.id===prev) || outs[0];
+  sel.value = midiOut.id;
+}
+
+/* ---- entrée MIDI : jeu live + saisie sur le pad survolé ---------- */
+function midiInputs(){
+  return midiAccess ? [...midiAccess.inputs.values()] : [];
+}
+/* l'écoute reste branchée sur tous les claviers ; le drapeau filtre  */
+function refreshMidiInputs(){
+  const ins=midiInputs();
+  ins.forEach(p=>{ p.onmidimessage = onMidiMessage; });
+  const msg=$("#midiInMsg");
+  if(msg) msg.textContent = ins.length
+    ? "Détecté : "+ins.map(p=>p.name).join(", ")
+    : "Aucun clavier MIDI détecté — branche-le en USB.";
+}
+/* note jouée -> repliée dans l'ambitus 24-84 */
+function foldToRange(n){
+  while(n<PITCH_MIN) n+=12;
+  while(n>PITCH_MAX) n-=12;
+  return n;
+}
+function onMidiMessage(ev){
+  if(!midiCfg.input || ev.data.length<3) return;
+  const cmd=ev.data[0]&0xF0;                 // note-on, vélocité > 0
+  if(cmd===0x90 && ev.data[2]>0) midiPlayNote(foldToRange(ev.data[1]));
+}
+/* enregistrement live : pas le plus proche du curseur de lecture */
+function nearestStep(){
+  if(beamAt<0) return curStep%state.length;
+  const into=ac.currentTime - beamTime;            // temps écoulé dans le pas
+  const s=beamAt + (into > stepDur()/2 ? 1 : 0);   // arrondi au plus proche
+  return ((s%state.length)+state.length)%state.length;
+}
+function flashCell(id,s){
+  const c=cellEls[id] && cellEls[id][s]; if(!c) return;
+  c.classList.add("rec");
+  setTimeout(()=>c.classList.remove("rec"),190);
+}
+function updateRecDot(){
+  $("#recDot").hidden = !(midiCfg.rec && midiCfg.input);
+}
+/* joue la voix de la piste survolée ; sur un pad survolé, y inscrit la note ;
+   en mode Enregistrer + lecture, cale la note sur le pas le plus proche       */
+function midiPlayNote(note){
+  ensureAudio(); resumeAudio();
+  if(midiCfg.rec && state.playing){
+    const id=midiInTrack, s=nearestStep();
+    setCell(id,s,note);
+    trigger(id, ac.currentTime+0.02, note);
+    flashCell(id,s);
+    return;
+  }
+  if(hoverCell){
+    const {id,s}=hoverCell;
+    setCell(id,s,note);
+    trigger(id, ac.currentTime+0.02, note);
+    tipForCell(id,s);
+    clearTimeout(tipTimer); tipTimer=setTimeout(hideTip,900);
+  }else{
+    trigger(midiInTrack, ac.currentTime+0.02, note);
+  }
+}
+
+/* Pont temporel : l'ordonnanceur raisonne en AudioContext.currentTime
+   (secondes) ; Web MIDI send() attend un timestamp performance.now()
+   (ms). L'écart entre les deux horloges est stable sur la fenêtre.   */
+function perfTimeFor(audioTime){
+  return performance.now() + (audioTime - ac.currentTime)*1000;
+}
+function midiSendNote(id, ch, audioTime, stepSec, note){
+  if(!midiOut) return;
+  const on   = perfTimeFor(audioTime);
+  const gate = Math.min(stepSec*0.9, 0.12)*1000;     // note courte
+  midiOut.send([0x90|ch, note, 100], on);
+  midiOut.send([0x80|ch, note, 0],   on+gate);
+}
+function midiPanic(){
+  if(!midiOut) return;
+  if(midiOut.clear) midiOut.clear();                 // purge les messages programmés
+  MIDI_CHANNELS.forEach(ch=> midiOut.send([0xB0|ch, 123, 0]));   // All Notes Off
+}
+
+/* ---- Export Standard MIDI File (format 0, 96 PPQ) -------------- */
+function vlq(n){                                     // variable-length quantity
+  const out=[n & 0x7f]; n>>=7;
+  while(n>0){ out.unshift((n & 0x7f)|0x80); n>>=7; }
+  return out;
+}
+function exportMidi(){
+  const PPQ=96, stepTk=PPQ/state.res;     // res 2->48, 4->24, 8->12, 16->6 ticks
+  const L=state.length, ev=[];
+  TRACKS.forEach((t,i)=>{
+    const ch=i%16;
+    for(let s=0;s<L;s++){
+      const note=state.grid[t.id][s];
+      if(!note) continue;
+      const d=state.subdiv[t.id][s]||1;
+      const sw=(s%2===1)?Math.round(stepTk*state.swing/100):0;
+      const sub=stepTk/d;
+      for(let k=0;k<d;k++){
+        const on=Math.round(s*stepTk+sw+k*sub);
+        const off=on+Math.max(1,Math.min(Math.round(sub)-1,12));
+        ev.push({tk:on, d:[0x90|ch,note,100]});
+        ev.push({tk:off,d:[0x80|ch,note,0]});
+      }
+    }
+  });
+  ev.sort((a,b)=>a.tk-b.tk);
+  const trk=[], put=a=>{ for(const b of a) trk.push(b); };
+  const mpq=Math.round(60000000/state.bpm);          // microsecondes par noire
+  put(vlq(0)); put([0xFF,0x51,0x03,(mpq>>16)&0xff,(mpq>>8)&0xff,mpq&0xff]);
+  put(vlq(0)); put([0xFF,0x58,0x04,0x04,0x02,0x18,0x08]);          // mesure 4/4
+  const nm=[...new TextEncoder().encode((state.name||"STEP-SEQ").slice(0,60))];
+  put(vlq(0)); put([0xFF,0x03,...vlq(nm.length),...nm]);           // nom de piste
+  let last=0;
+  ev.forEach(e=>{ put(vlq(e.tk-last)); put(e.d); last=e.tk; });
+  put(vlq(Math.max(0,L*stepTk-last))); put([0xFF,0x2F,0x00]);      // fin = longueur exacte
+  const u32=n=>[(n>>>24)&0xff,(n>>>16)&0xff,(n>>>8)&0xff,n&0xff];
+  const bytes=new Uint8Array([
+    0x4D,0x54,0x68,0x64, 0,0,0,6, 0,0, 0,1, (PPQ>>8)&0xff,PPQ&0xff,  // MThd
+    0x4D,0x54,0x72,0x6B, ...u32(trk.length), ...trk,                 // MTrk
+  ]);
+  const file=((state.name||"pattern").toLowerCase()
+              .replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,""))||"pattern";
+  const url=URL.createObjectURL(new Blob([bytes],{type:"audio/midi"}));
+  const a=document.createElement("a");
+  a.href=url; a.download=file+".mid"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+/* =================================================================
+   4. ORDONNANCEUR  (lookahead — horloge audio, pas setTimeout)
+   ================================================================= */
+const LOOKAHEAD=0.10, TICK=25;
+let curStep=0, nextTime=0, clockNextTime=0, timer=null;
+const visualQ=[];
+
+const stepDur = ()=> 60/state.bpm/state.res;       // durée d'un pas
+
+function schedule(){
+  const ahead = ac.currentTime + LOOKAHEAD;
+  while(nextTime < ahead){
+    const dur=stepDur();
+    const swing = (curStep%2===1) ? dur*(state.swing/100) : 0;
+    const when = nextTime + swing;
+    TRACKS.forEach((t,i)=>{
+      const p=state.grid[t.id][curStep];
+      if(!p || state.mutes[t.id]) return;
+      const d=state.subdiv[t.id][curStep]||1;   // 1-4 répétitions dans le pas
+      const sub=dur/d;
+      for(let k=0;k<d;k++){
+        const tt=when + k*sub;
+        if(midiCfg.audio)    trigger(t.id,tt,p);
+        if(midiCfg.notesOut) midiSendNote(t.id,i%16,tt,sub,p);
+      }
+    });
+    visualQ.push({step:curStep,time:when});
+    nextTime += dur;
+    curStep = (curStep+1)%state.length;
+  }
+  // horloge MIDI : 24 ppqn, indépendante de la résolution de grille
+  if(midiCfg.clockOut && midiOut){
+    const tick=60/state.bpm/24;
+    if(clockNextTime < ac.currentTime) clockNextTime = ac.currentTime;
+    while(clockNextTime < ahead){
+      midiOut.send([0xF8], perfTimeFor(clockNextTime));
+      clockNextTime += tick;
+    }
+  }
+}
+function visualLoop(){
+  while(visualQ.length && visualQ[0].time <= ac.currentTime){
+    const it=visualQ.shift();
+    beamTime=it.time;                 // onset réel du pas affiché (swing inclus)
+    setBeam(it.step);
+  }
+  if(state.playing) requestAnimationFrame(visualLoop);
+}
+function play(){
+  ensureAudio(); resumeAudio();
+  if(state.playing) return;
+  state.playing=true; curStep=0;
+  nextTime=ac.currentTime+0.06; clockNextTime=nextTime;
+  if(midiCfg.clockOut && midiOut) midiOut.send([0xFA], perfTimeFor(nextTime)); // Start
+  timer=setInterval(schedule,TICK);
+  requestAnimationFrame(visualLoop);
+  $("#play").setAttribute("aria-pressed","true");
+}
+function stop(){
+  state.playing=false;
+  clearInterval(timer); timer=null; visualQ.length=0;
+  setBeam(-1);
+  $("#play").setAttribute("aria-pressed","false");
+  if(midiOut){
+    if(midiCfg.clockOut) midiOut.send([0xFC]);   // Stop
+    midiPanic();                                  // purge + All Notes Off
+  }
+}
+
+/* =================================================================
+   5. GRILLE  (reconstruite quand longueur / résolution changent)
+   ================================================================= */
+const cellEls={}, headEls=[], labelEls={};
+let beamAt=-1, beamTime=0;          // beamTime : onset du pas affiché (quantif. rec)
+
+function buildGrid(){
+  const m=$("#matrix"); m.innerHTML=""; headEls.length=0;
+  visualQ.length=0; beamAt=-1;
+  const L=state.length, R=state.res;
+  m.style.gridTemplateColumns=`var(--label-w) repeat(${L},minmax(26px,1fr))`;
+  m.style.minWidth=(126 + L*26)+"px";
+
+  // ligne d'en-tête : numéro de temps aux débuts de temps
+  const corner=document.createElement("div"); corner.className="hcell corner";
+  m.appendChild(corner);
+  for(let s=0;s<L;s++){
+    const h=document.createElement("div");
+    const beat=(s%R===0);
+    h.className="hcell"+(beat?" beat":"");
+    h.textContent=beat?(s/R+1):"";
+    m.appendChild(h); headEls.push(h);
+  }
+  // une ligne par piste
+  TRACKS.forEach(t=>{
+    cellEls[t.id]=[];
+    const lab=document.createElement("div");
+    lab.className="label"+(state.mutes[t.id]?" muted":"");
+    lab.style.setProperty("--lc",t.color);
+    lab.innerHTML=`<span class="name"></span>`+
+                  `<span class="note"></span><span class="led"></span>`;
+    lab.addEventListener("click",()=>toggleMute(t.id,lab));
+    labelEls[t.id]=lab;
+    m.appendChild(lab);
+    for(let s=0;s<L;s++){
+      const c=document.createElement("div");
+      c.className="cell"+(s%R===0?" g-start":"");
+      c.style.setProperty("--lc",t.color);
+      c.dataset.t=t.id; c.dataset.s=s;
+      m.appendChild(c); cellEls[t.id].push(c);
+      updateCellEl(t.id,s);
+    }
+  });
+}
+function refreshLabel(id){
+  const v=state.voices[id], lab=labelEls[id];
+  lab.querySelector(".name").textContent=INSTRUMENTS[v.inst].name;
+  lab.querySelector(".note").textContent=noteName(v.pitch);
+}
+function refreshLabels(){ TRACKS.forEach(t=>refreshLabel(t.id)); }
+
+/* valeur d'une cellule : 0 = éteinte, sinon note MIDI (24..84).
+   La hauteur de la barre de couleur encode la note.               */
+function pitchPct(p){
+  return (14 + (p-PITCH_MIN)/(PITCH_MAX-PITCH_MIN)*86).toFixed(1);
+}
+function updateCellEl(id,s){
+  const c=cellEls[id][s], p=state.grid[id][s];
+  if(p){
+    const d=state.subdiv[id][s]||1;
+    c.classList.add("on");
+    c.style.setProperty("--h",pitchPct(p)+"%");
+    c.style.setProperty("--n",d);                 // nombre de sous-pas
+    c.style.setProperty("--lw",d>1?"1.6px":"0px"); // largeur des séparateurs
+    c.dataset.note=noteName(p)+(d>1?"·"+d:"");
+  }else{
+    c.classList.remove("on");
+    delete c.dataset.note;
+  }
+}
+function setCell(id,s,pitch){
+  state.grid[id][s]=pitch||0;
+  updateCellEl(id,s);
+}
+/* subdivision d'un pas : 1 = simple, 2-4 = répétitions régulières (croches, etc.) */
+function setDiv(id,s,div){
+  state.subdiv[id][s]=Math.max(1,Math.min(4,div|0));
+  updateCellEl(id,s);
+}
+function refreshGrid(){
+  TRACKS.forEach(t=>{
+    for(let s=0;s<state.length;s++) updateCellEl(t.id,s);
+  });
+}
+function setBeam(step){
+  if(beamAt===step) return;
+  if(beamAt>=0 && beamAt<state.length){
+    TRACKS.forEach(t=>cellEls[t.id][beamAt].classList.remove("beam"));
+    if(headEls[beamAt]) headEls[beamAt].classList.remove("head-on");
+  }
+  if(step>=0 && step<state.length){
+    TRACKS.forEach(t=>cellEls[t.id][step].classList.add("beam"));
+    if(headEls[step]) headEls[step].classList.add("head-on");
+  }
+  beamAt=step;
+}
+function toggleMute(id,labEl){
+  state.mutes[id]=!state.mutes[id];
+  labEl.classList.toggle("muted",state.mutes[id]);
+}
+
+/* longueur du pattern : redimensionne les tableaux puis reconstruit */
+function setLength(n){
+  n=Math.max(LEN_MIN,Math.min(LEN_MAX,n|0));
+  if(n===state.length) return;
+  TRACKS.forEach(t=>{
+    const old=state.grid[t.id], na=new Array(n).fill(0);
+    const odv=state.subdiv[t.id], nd=new Array(n).fill(1);
+    for(let s=0;s<Math.min(n,old.length);s++){ na[s]=old[s]; nd[s]=odv[s]||1; }
+    state.grid[t.id]=na;
+    state.subdiv[t.id]=nd;
+  });
+  state.length=n;
+  if(curStep>=n) curStep=0;
+  $("#lenOut").textContent=n;
+  buildGrid(); refreshLabels();
+}
+function setRes(r){
+  if(![2,4,8,16].includes(r) || r===state.res) return;
+  state.res=r;
+  buildGrid(); refreshLabels();
+}
+
+/* ---- interaction grille ----------------------------------------
+   clic sur un pad             -> allume / éteint (à la note par défaut)
+   glissé vertical sur un pad  -> règle sa hauteur (la barre suit)
+   pad survolé + flèches ↑/↓   -> ajuste la note au clavier
+   clic droit / flèches ←/→    -> subdivise le pas en 1-4 (croches…)   */
+const DRAG_THRESH=5;        // px avant de considérer un vrai glissé
+const PX_PER_SEMI=7;        // sensibilité verticale (px par demi-ton)
+let drag=null;                      // pad en cours de réglage
+let hoverCell=null, hoverEl=null;   // pad sous le curseur (cible clavier)
+let tipTimer=null;
+
+function auditionNote(id,pitch){
+  ensureAudio(); resumeAudio();
+  trigger(id, ac.currentTime+0.02, pitch);
+}
+function auditionRatchet(id,pitch,d){
+  ensureAudio(); resumeAudio();
+  const span=0.22;                              // étale les répétitions sur ~220ms
+  for(let k=0;k<d;k++) trigger(id, ac.currentTime+0.02+k*span/d, pitch);
+}
+function showTip(x,y,txt){
+  const t=$("#tip");
+  t.textContent=txt;
+  t.style.left=(x+14)+"px"; t.style.top=(y-12)+"px";
+  t.classList.add("show");
+}
+function hideTip(){ $("#tip").classList.remove("show"); }
+function setHover(h){
+  if(hoverEl) hoverEl.classList.remove("hover");
+  hoverCell=h; hoverEl=h?h.el:null;
+  if(hoverEl) hoverEl.classList.add("hover");
+  if(h) midiInTrack=h.id;            // cible du jeu live MIDI hors grille
+}
+function tipForCell(id,s){
+  const r=cellEls[id][s].getBoundingClientRect();
+  const p=state.grid[id][s], d=state.subdiv[id][s]||1;
+  showTip(r.right-14, r.top,
+    INSTRUMENTS[state.voices[id].inst].name+" · "+noteName(p)+(d>1?" ÷"+d:""));
+}
+
+/* --- glissé vertical : règle la hauteur du pad pressé --- */
+$("#matrix").addEventListener("pointerdown",e=>{
+  const c=e.target.closest(".cell"); if(!c) return;
+  e.preventDefault();
+  const id=c.dataset.t, s=+c.dataset.s;
+  drag={id,s,moved:false,y0:e.clientY,
+        startPitch:(state.grid[id][s]||state.voices[id].pitch), lastAud:-1};
+});
+window.addEventListener("pointermove",e=>{
+  if(!drag) return;
+  if(e.buttons===0){ endDrag(); return; }    // bouton relâché : on solde le glissé
+  const dy=drag.y0-e.clientY;
+  if(!drag.moved){
+    if(Math.abs(dy)<DRAG_THRESH) return;      // pas encore un vrai glissé
+    drag.moved=true;
+  }
+  let p=drag.startPitch+Math.round(dy/PX_PER_SEMI);
+  p=Math.max(PITCH_MIN,Math.min(PITCH_MAX,p));
+  if(state.grid[drag.id][drag.s]!==p) setCell(drag.id,drag.s,p);
+  if(p!==drag.lastAud){ auditionNote(drag.id,p); drag.lastAud=p; }
+  showTip(e.clientX,e.clientY,
+    INSTRUMENTS[state.voices[drag.id].inst].name+" · "+noteName(p));
+});
+function endDrag(){
+  if(drag && !drag.moved){          // pas de glissé -> simple clic : bascule on/off
+    const cur=state.grid[drag.id][drag.s];
+    const np=cur?0:state.voices[drag.id].pitch;
+    setCell(drag.id,drag.s,np);
+    if(np) auditionNote(drag.id,np);
+  }
+  hideTip(); drag=null;
+}
+window.addEventListener("pointerup",endDrag);
+window.addEventListener("pointercancel",endDrag);
+
+/* --- clic droit sur un pad allumé : cycle la subdivision 1->2->3->4->1 --- */
+$("#matrix").addEventListener("contextmenu",e=>{
+  const c=e.target.closest(".cell"); if(!c) return;
+  e.preventDefault();
+  const id=c.dataset.t, s=+c.dataset.s;
+  if(!state.grid[id][s]) return;                 // n'agit que sur un pad allumé
+  const d=(state.subdiv[id][s]||1)%4 + 1;
+  setDiv(id,s,d);
+  auditionRatchet(id,state.grid[id][s],d);
+});
+
+/* --- survol : mémorise le pad cible des flèches clavier --- */
+$("#matrix").addEventListener("pointermove",e=>{
+  if(drag) return;
+  const c=e.target.closest(".cell");
+  setHover(c ? {id:c.dataset.t,s:+c.dataset.s,el:c} : null);
+});
+$("#matrix").addEventListener("pointerleave",()=>setHover(null));
+
+/* =================================================================
+   6. CONTRÔLES DE TRANSPORT
+   ================================================================= */
+function setBpm(v){
+  state.bpm=Math.max(40,Math.min(300,Math.round(v)));
+  $("#bpmOut").textContent=state.bpm;
+}
+$("#play").onclick=play;
+$("#stop").onclick=stop;
+$("#bpmUp").onclick  =e=>setBpm(state.bpm+(e.shiftKey?10:1));
+$("#bpmDown").onclick=e=>setBpm(state.bpm-(e.shiftKey?10:1));
+$("#bpmOut").addEventListener("wheel",e=>{
+  e.preventDefault(); setBpm(state.bpm+(e.deltaY<0?1:-1));
+},{passive:false});
+$("#lenUp").onclick  =e=>setLength(state.length+(e.shiftKey?state.res:1));
+$("#lenDown").onclick=e=>setLength(state.length-(e.shiftKey?state.res:1));
+$("#lenOut").addEventListener("wheel",e=>{
+  e.preventDefault(); setLength(state.length+(e.deltaY<0?1:-1));
+},{passive:false});
+const resSel=$("#resSel");
+RES_OPTIONS.forEach(o=>{
+  const op=document.createElement("option");
+  op.value=o.v; op.textContent=o.name; resSel.appendChild(op);
+});
+resSel.value=state.res;
+resSel.onchange=()=>setRes(+resSel.value);
+$("#swing").oninput=e=>state.swing=+e.target.value;
+$("#vol").oninput  =e=>{ if(master) master.gain.value=+e.target.value/100; };
+$("#clear").onclick=()=>{
+  TRACKS.forEach(t=>{ state.grid[t.id].fill(0); state.subdiv[t.id].fill(1); });
+  refreshGrid();
+};
+$("#rand").onclick=()=>{
+  const SPREAD=[0,0,2,3,5,7,-5,12];     // intervalles agréables pour le mélodique
+  TRACKS.forEach(t=>{
+    const v=state.voices[t.id], drum=INSTRUMENTS[v.inst].drum;
+    const dens=drum?0.26:0.18;
+    for(let s=0;s<state.length;s++){
+      if(Math.random()>=dens){ state.grid[t.id][s]=0; state.subdiv[t.id][s]=1; continue; }
+      const off=drum?0:SPREAD[(Math.random()*SPREAD.length)|0];
+      state.grid[t.id][s]=Math.max(PITCH_MIN,Math.min(PITCH_MAX,v.pitch+off));
+      state.subdiv[t.id][s]=Math.random()<0.12 ? 2+((Math.random()*3)|0) : 1;
+    }
+  });
+  state.grid[TRACKS[0].id][0]=state.voices[TRACKS[0].id].pitch;
+  refreshGrid();
+};
+$("#pname").addEventListener("input",e=>{
+  state.name=e.target.value.toUpperCase();
+});
+document.addEventListener("keydown",e=>{
+  const onField = e.target.tagName==="INPUT" || e.target.tagName==="SELECT";
+  if(e.code==="Space" && !onField){
+    e.preventDefault(); state.playing?stop():play(); return;
+  }
+  if(onField || !hoverCell) return;
+  const {id,s}=hoverCell;
+  if(e.code==="ArrowUp" || e.code==="ArrowDown"){
+    e.preventDefault();
+    const step=(e.code==="ArrowUp"?1:-1)*(e.shiftKey?12:1);
+    const cur=state.grid[id][s]||state.voices[id].pitch;
+    const p=Math.max(PITCH_MIN,Math.min(PITCH_MAX,cur+step));
+    setCell(id,s,p); auditionNote(id,p);
+    tipForCell(id,s);
+    clearTimeout(tipTimer); tipTimer=setTimeout(hideTip,900);
+  }else if(e.code==="ArrowLeft" || e.code==="ArrowRight"){
+    e.preventDefault();
+    if(!state.grid[id][s]) return;                 // subdivise un pad allumé
+    const d=Math.max(1,Math.min(4,
+      (state.subdiv[id][s]||1)+(e.code==="ArrowRight"?1:-1)));
+    setDiv(id,s,d);
+    auditionRatchet(id,state.grid[id][s],d);
+    tipForCell(id,s);
+    clearTimeout(tipTimer); tipTimer=setTimeout(hideTip,900);
+  }else if(e.code==="Enter"){
+    e.preventDefault();
+    const cur=state.grid[id][s];
+    setCell(id,s, cur?0:state.voices[id].pitch);
+  }else if(e.code==="Delete" || e.code==="Backspace"){
+    e.preventDefault(); setCell(id,s,0);
+  }
+});
+
+/* =================================================================
+   7. SUPABASE  (auth + cloud) — dégradation gracieuse si absent
+   ================================================================= */
+let sb=null, session=null;
+
+async function initCloud(){
+  let cfg=null;
+  try{
+    const r=await fetch("/config");
+    if(r.ok) cfg=await r.json();
+  }catch(_){/* pas de backend : mode hors-ligne */}
+  if(cfg && cfg.supabaseUrl && cfg.supabaseAnonKey
+        && !window.__sbDown && window.supabase){
+    sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
+    const {data}=await sb.auth.getSession();
+    session=data.session;
+    sb.auth.onAuthStateChange((_e,s)=>{session=s;renderAuth();});
+  }
+  renderAuth();
+}
+const cloudOn = ()=> !!(sb && session);
+
+function renderAuth(){
+  const st=$("#status"), btn=$("#auth");
+  if(cloudOn()){
+    st.textContent="● "+(session.user.email||"connecté");
+    st.classList.add("online");
+    btn.textContent="Logout";
+  }else{
+    st.textContent = sb ? "Hors-ligne — banque locale"
+                        : "Hors-ligne — Supabase non configuré";
+    st.classList.remove("online");
+    btn.textContent="Login";
+    btn.disabled = !sb;
+  }
+}
+
+/* =================================================================
+   8. API BACKEND  (Go / Cloud Run)
+   ================================================================= */
+async function api(path,opts={}){
+  const h=Object.assign({"Content-Type":"application/json"},opts.headers||{});
+  if(session) h["Authorization"]="Bearer "+session.access_token;
+  const r=await fetch("/api"+path,Object.assign({},opts,{headers:h}));
+  if(!r.ok){
+    let m="erreur "+r.status;
+    try{ m=(await r.json()).error||m; }catch(_){}
+    throw new Error(m);
+  }
+  return r.status===204?null:r.json();
+}
+
+/* =================================================================
+   9. BANQUE DE PATTERNS  (cloud si connecté, sinon localStorage)
+   ================================================================= */
+const LKEY="atari-seq:bank";
+let memBank=[];                          // repli si localStorage bloqué
+
+function localRead(){
+  try{ return JSON.parse(localStorage.getItem(LKEY)||"[]"); }
+  catch(_){ return memBank; }
+}
+function localWrite(list){
+  try{ localStorage.setItem(LKEY,JSON.stringify(list)); }
+  catch(_){ memBank=list; }
+}
+function snapshot(){
+  // grille + voix + longueur + résolution sont rangées dans le jsonb
+  // "steps" -> aucune modification du backend nécessaire.
+  return {name:state.name||"PATTERN", bpm:state.bpm, swing:state.swing,
+          steps:{grid:state.grid, subdiv:state.subdiv, voices:state.voices,
+                 length:state.length, res:state.res}};
+}
+function applyPattern(p){
+  state.name=(p.name||"PATTERN").toUpperCase();
+  setBpm(p.bpm||120);
+  state.swing=Math.max(0,Math.min(75,p.swing||0));
+  $("#swing").value=state.swing;
+
+  // rétro-compat : ancien format -> "steps" EST la grille ;
+  // nouveau format -> {grid, voices, length, res}.
+  const raw=p.steps||{};
+  const grid=raw.grid||raw, voices=raw.voices||null;
+  const subs=raw.subdiv||null;       // peut manquer (anciens patterns)
+  let len=raw.length|0;
+  if(!len){
+    for(const k in grid)
+      if(Array.isArray(grid[k])) len=Math.max(len,grid[k].length);
+  }
+  state.length=Math.max(LEN_MIN,Math.min(LEN_MAX,len||16));
+  state.res=[2,4,8,16].includes(raw.res)?raw.res:4;
+
+  TRACKS.forEach((t,i)=>{
+    // voix d'abord : sert de hauteur par défaut aux anciens patterns 0/1
+    const v=voices && (voices[t.id]||voices[LEGACY_ID[t.id]]);
+    if(v && INSTRUMENTS[v.inst]){
+      const pitch=Math.max(PITCH_MIN,Math.min(PITCH_MAX,
+                    (v.pitch|0)||INST_DEFAULT_PITCH[v.inst]||60));
+      state.voices[t.id]={inst:v.inst,pitch};
+    }else{
+      const inst=KIT[i%KIT.length];
+      state.voices[t.id]={inst, pitch:INST_DEFAULT_PITCH[inst]};
+    }
+    // grille : 0 = éteint ; valeur >=24 = note ; valeur 1 (ancien format) = défaut
+    const def=state.voices[t.id].pitch;
+    const src=grid[t.id]||grid[LEGACY_ID[t.id]]||[];
+    const dsrc=(subs && (subs[t.id]||subs[LEGACY_ID[t.id]]))||[];
+    const a=new Array(state.length).fill(0);
+    const dv=new Array(state.length).fill(1);
+    for(let s=0;s<state.length;s++){
+      const raw=src[s]|0;
+      a[s]= raw>=PITCH_MIN ? Math.min(PITCH_MAX,raw) : (raw?def:0);
+      dv[s]=Math.max(1,Math.min(4,(dsrc[s]|0)||1));
+    }
+    state.grid[t.id]=a;
+    state.subdiv[t.id]=dv;
+  });
+  state.mutes && TRACKS.forEach(t=>state.mutes[t.id]=false);
+  $("#pname").value=state.name;
+  $("#lenOut").textContent=state.length;
+  $("#resSel").value=state.res;
+  buildGrid(); refreshLabels();
+}
+
+async function savePattern(){
+  const snap=snapshot();
+  if(cloudOn()){
+    await api("/patterns",{method:"POST",body:JSON.stringify(snap)});
+  }else{
+    const list=localRead();
+    list.unshift(Object.assign(
+      {id:"loc-"+Date.now(),updatedAt:new Date().toISOString()},snap));
+    localWrite(list.slice(0,100));
+  }
+}
+async function fetchBank(){
+  if(cloudOn()) return (await api("/patterns")).patterns||[];
+  return localRead();
+}
+async function deletePattern(id){
+  if(cloudOn() && !String(id).startsWith("loc-")){
+    await api("/patterns/"+id,{method:"DELETE"});
+  }else{
+    localWrite(localRead().filter(p=>p.id!==id));
+  }
+}
+
+/* =================================================================
+   10. DIALOGUES GEM
+   ================================================================= */
+function show(id){ $("#"+id).classList.add("show"); }
+function hide(id){ $("#"+id).classList.remove("show"); }
+document.querySelectorAll("[data-close]").forEach(b=>
+  b.onclick=()=>hide(b.dataset.close));
+document.querySelectorAll(".overlay").forEach(o=>
+  o.addEventListener("pointerdown",e=>{ if(e.target===o) hide(o.id); }));
+
+async function openBank(){
+  $("#bankTitle").textContent = cloudOn()?"Banque cloud":"Banque locale";
+  const list=$("#banklist"); list.innerHTML="";
+  $("#bankMsg").textContent="";
+  let items=[];
+  try{ items=await fetchBank(); }
+  catch(e){ bankMsg(e.message,true); }
+  if(!items.length){
+    list.innerHTML='<div class="bank-empty">— aucun pattern enregistré —</div>';
+  }else{
+    items.forEach(p=>{
+      const row=document.createElement("div"); row.className="bankrow";
+      const when=p.updatedAt?new Date(p.updatedAt)
+                  .toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}):"";
+      row.innerHTML=`<span class="bn">${escapeHtml(p.name||"—")}</span>
+        <span class="bm">${p.bpm||"?"} BPM ${when}</span>`;
+      const load=mkBtn("Load",()=>{ applyPattern(p); hide("bankOverlay"); });
+      const del =mkBtn("Del",async()=>{
+        try{ await deletePattern(p.id); openBank(); }
+        catch(e){ bankMsg(e.message,true); }
+      });
+      row.appendChild(load); row.appendChild(del);
+      list.appendChild(row);
+    });
+  }
+  show("bankOverlay");
+}
+function bankMsg(t,err){
+  const m=$("#bankMsg"); m.textContent=t;
+  m.className="msg "+(err?"err":"ok");
+}
+function mkBtn(label,fn){
+  const b=document.createElement("button");
+  b.className="btn"; b.textContent=label; b.onclick=fn; return b;
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"]/g,c=>(
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+$("#save").onclick=async()=>{
+  try{ await savePattern(); flash($("#save"),"OK !"); }
+  catch(e){ alert("Sauvegarde impossible : "+e.message); }
+};
+$("#bank").onclick=openBank;
+function flash(btn,txt){
+  const old=btn.textContent; btn.textContent=txt;
+  setTimeout(()=>btn.textContent=old,900);
+}
+
+/* ---- auth ---- */
+$("#auth").onclick=async()=>{
+  if(cloudOn()){ await sb.auth.signOut(); session=null; renderAuth(); return; }
+  authMsg(""); show("authOverlay");
+};
+function authMsg(t,err){
+  const m=$("#authMsg"); m.textContent=t;
+  m.className="msg "+(err?"err":"ok");
+}
+$("#doLogin").onclick=async()=>{
+  if(!sb) return;
+  try{
+    const {data,error}=await sb.auth.signInWithPassword({
+      email:$("#email").value.trim(), password:$("#pass").value});
+    if(error) throw error;
+    session=data.session; renderAuth(); hide("authOverlay");
+  }catch(e){ authMsg(e.message||"échec de connexion",true); }
+};
+$("#doSignup").onclick=async()=>{
+  if(!sb) return;
+  try{
+    const {error}=await sb.auth.signUp({
+      email:$("#email").value.trim(), password:$("#pass").value});
+    if(error) throw error;
+    authMsg("Compte créé. Vérifie tes e-mails puis connecte-toi.",false);
+  }catch(e){ authMsg(e.message||"échec de création",true); }
+};
+
+/* ---- Voix : instrument + hauteur par piste ---- */
+function buildVoiceRows(){
+  const list=$("#voicelist"); list.innerHTML="";
+  TRACKS.forEach((t,idx)=>{
+    const v=state.voices[t.id];
+    const row=document.createElement("div"); row.className="voicerow";
+    row.style.setProperty("--lc",t.color);
+
+    const chip=document.createElement("span"); chip.className="vchip";
+    const num=document.createElement("span"); num.className="vnum";
+    num.textContent=idx+1;
+
+    const inst=document.createElement("select"); inst.className="gem-select";
+    INST_KEYS.forEach(k=>{
+      const o=document.createElement("option");
+      o.value=k; o.textContent=INSTRUMENTS[k].name;
+      if(k===v.inst) o.selected=true;
+      inst.appendChild(o);
+    });
+    inst.onchange=()=>{ state.voices[t.id].inst=inst.value;
+                        refreshLabel(t.id);
+                        auditionNote(t.id,state.voices[t.id].pitch); };
+
+    const note=document.createElement("select"); note.className="gem-select";
+    for(let m=PITCH_MAX;m>=PITCH_MIN;m--){
+      const o=document.createElement("option");
+      o.value=m; o.textContent=noteName(m);
+      if(m===v.pitch) o.selected=true;
+      note.appendChild(o);
+    }
+    note.onchange=()=>{ state.voices[t.id].pitch=+note.value;
+                        refreshLabel(t.id);
+                        auditionNote(t.id,state.voices[t.id].pitch); };
+
+    const prev=document.createElement("button");
+    prev.className="btn"; prev.textContent="\u25B6";
+    prev.title="écouter";
+    prev.onclick=()=>auditionNote(t.id,state.voices[t.id].pitch);
+
+    row.append(num,chip,inst,note,prev);
+    list.appendChild(row);
+  });
+}
+$("#voiceBtn").onclick=()=>{ buildVoiceRows(); show("voiceOverlay"); };
+
+/* ---- MIDI ---- */
+async function openMidi(){
+  await initMidi();
+  listMidiOuts();
+  refreshMidiInputs();
+  const ok=midiSupported();
+  $("#midiPort").disabled=!ok;
+  $("#midiNotes").disabled=!ok;
+  $("#midiClock").disabled=!ok;
+  $("#midiIn").disabled=!ok;
+  $("#midiRec").disabled=!ok;
+  $("#midiMsg").textContent = ok ? ""
+    : "Web MIDI non supporté ici (Safari) — l'export .mid reste disponible.";
+  $("#midiMsg").className = "msg"+(ok?"":" err");
+  show("midiOverlay");
+}
+$("#midiBtn").onclick=openMidi;
+$("#midiPort").onchange=e=>{
+  midiPanic();
+  midiOut = midiOutputs().find(o=>o.id===e.target.value) || null;
+};
+$("#midiNotes").onchange=e=>{ midiCfg.notesOut=e.target.checked; };
+$("#midiClock").onchange=e=>{
+  midiCfg.clockOut=e.target.checked;
+  if(e.target.checked){ if(ac) clockNextTime=ac.currentTime; }
+  else if(midiOut) midiOut.send([0xFC]);   // Stop si on coupe l'horloge
+};
+$("#midiAudio").onchange=e=>{ midiCfg.audio=e.target.checked; };
+$("#midiIn").onchange=e=>{
+  midiCfg.input=e.target.checked;
+  if(e.target.checked) ensureAudio();   // contexte audio créé sous le geste utilisateur
+  updateRecDot();
+};
+$("#midiRec").onchange=e=>{
+  midiCfg.rec=e.target.checked;
+  if(e.target.checked && !midiCfg.input){   // Enregistrer implique l'entrée MIDI
+    midiCfg.input=true; $("#midiIn").checked=true;
+  }
+  if(e.target.checked) ensureAudio();
+  updateRecDot();
+};
+$("#exportMidi").onclick=()=>{
+  try{ exportMidi(); flash($("#exportMidi"),"OK !"); }
+  catch(err){
+    $("#midiMsg").textContent="Export impossible : "+err.message;
+    $("#midiMsg").className="msg err";
+  }
+};
+
+/* =================================================================
+   11. DÉMARRAGE
+   ================================================================= */
+buildGrid();
+refreshLabels();
+// petit motif de démo pour que ça sonne dès l'ouverture
+[0,4,8,12].forEach(s=>state.grid.t1[s]=state.voices.t1.pitch);            // kick
+[4,12].forEach(s=>state.grid.t2[s]=state.voices.t2.pitch);                // snare
+[0,2,4,6,8,10,12,14].forEach(s=>state.grid.t3[s]=state.voices.t3.pitch);  // hat
+[0,7].forEach(s=>state.grid.t6[s]=state.voices.t6.pitch);                 // bass
+refreshGrid();
+initCloud();
+</script>
+</body>
+</html>
