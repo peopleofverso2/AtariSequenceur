@@ -131,6 +131,11 @@ func run() error {
 		r.Get("/patterns/{id}", api.GetPattern)
 		r.Put("/patterns/{id}", api.UpdatePattern)
 		r.Delete("/patterns/{id}", api.DeletePattern)
+		r.Get("/songs", api.ListSongs)
+		r.Post("/songs", api.CreateSong)
+		r.Get("/songs/{id}", api.GetSong)
+		r.Put("/songs/{id}", api.UpdateSong)
+		r.Delete("/songs/{id}", api.DeleteSong)
 	})
 
 	// Embedded single-page frontend.

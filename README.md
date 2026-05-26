@@ -10,7 +10,8 @@ livré comme une vraie web app **Go + Cloud Run + Supabase**.
 - moteur de timing à *lookahead* calé sur l'horloge audio (pas de dérive)
 - sortie **MIDI** (Web MIDI : notes + horloge 24 ppqn) et **export `.mid`**
 - **entrée MIDI** : un clavier USB joue les voix, saisit la note dans le pad survolé, ou **enregistre en live** (quantisé sur le pas le plus proche pendant la lecture)
-- sauvegarde des patterns : **cloud** via Supabase quand on est connecté,
+- **mode song** : enchaîne plusieurs patterns sauvegardés, chacun joué *×N* fois, avec changement de tempo/longueur à chaque pattern
+- sauvegarde des patterns **et des songs** : **cloud** via Supabase quand on est connecté,
   **locale** sinon — l'app reste 100 % jouable hors-ligne
 
 ## Architecture
@@ -21,7 +22,8 @@ navigateur ──HTTP──► Cloud Run (binaire Go)
    │ supabase-js          ├─ /            frontend embarqué (go:embed)
    │ (auth, JWT)          ├─ /healthz     sonde Cloud Run
    ▼                      ├─ /config      URL + clé anon Supabase
-Supabase Auth             └─ /api/patterns   CRUD (JWT requis)
+Supabase Auth             ├─ /api/patterns   CRUD (JWT requis)
+                          └─ /api/songs      CRUD (JWT requis)
                                │
                                ▼ pgx pool
                           Supabase Postgres (RLS)
@@ -46,10 +48,10 @@ Choix structurants :
 ├── main.go                  routeur Chi, pool pgx, arrêt gracieux
 ├── internal/
 │   ├── auth/                vérification JWT HS256 (stdlib)
-│   ├── store/               accès Postgres (pgx)
-│   └── handlers/            API JSON patterns
+│   ├── store/               accès Postgres (pgx) — patterns + songs
+│   └── handlers/            API JSON patterns + songs
 ├── web/index.html           frontend séquenceur (embarqué)
-├── supabase/schema.sql       table + trigger + RLS
+├── supabase/schema.sql      tables (patterns, songs) + triggers + RLS
 └── Dockerfile               build multi-stage, image distroless
 ```
 
@@ -114,6 +116,6 @@ couleurs. Aucun logo ni marque Atari n'est utilisé — c'est un clin d'œil.
 ## Pistes d'extension
 
 - patterns partagés / publics (lecture seule via la clé anon + RLS)
-- enchaînement de patterns (mode *song*)
 - export WAV hors-ligne via `OfflineAudioContext`
 - accent / vélocité par pas
+- ~~enchaînement de patterns (mode *song*)~~ — fait, bouton **Song** dans le pied de page

@@ -315,6 +315,42 @@
   .voicerow .gem-select{flex:1}
   .voicerow .btn{padding:5px 9px;min-height:26px}
 
+  /* dialogue Song : liste d'items {patternId, repeats} */
+  .songlist{
+    max-height:220px;overflow-y:auto;min-height:60px;
+    background:var(--screen);
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+  }
+  .songrow{
+    display:flex;align-items:center;gap:6px;padding:6px 8px;
+    border-bottom:1px solid #1d1830;
+  }
+  .songrow.cur{background:#1c1834;box-shadow:inset 0 0 0 1px var(--beam)}
+  .songrow .si-idx{
+    width:24px;flex:none;text-align:right;
+    font-size:9px;font-weight:700;color:#6f6a8c;
+  }
+  .songrow .si-name{
+    flex:1;color:#d7d3ec;font-size:11px;font-weight:700;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .songrow .si-mul{font-size:10px;color:#6f6a8c}
+  .songrow input[type=number]{
+    width:50px;background:var(--hi);color:var(--ink);
+    font-family:var(--mono);font-size:11px;font-weight:700;
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    padding:2px 4px;text-align:center;
+  }
+  .songrow .btn{padding:4px 7px;min-height:22px;font-size:11px}
+  .song-empty{padding:14px;text-align:center;color:#6f6a8c;font-size:11px}
+  /* badge dans la barre de transport quand le mode song est armé */
+  .songbadge{
+    font-size:10px;font-weight:700;letter-spacing:.06em;
+    padding:3px 6px;background:#1d1830;color:var(--beam);
+    border:1px solid var(--sh);text-transform:uppercase;
+  }
+  .songbadge[hidden]{display:none}
+
   /* infobulle de hauteur (pendant le réglage d'un pad) */
   #tip{
     position:fixed;z-index:60;pointer-events:none;display:none;
@@ -344,6 +380,7 @@
     <button class="btn go" id="play" aria-pressed="false">&#9654; Play</button>
     <button class="btn" id="stop">&#9632; Stop</button>
     <span class="recdot" id="recDot" hidden>&#9679;&nbsp;REC</span>
+    <span class="songbadge" id="songBadge" hidden>SONG</span>
     <div class="sep"></div>
     <div class="field">Tempo
       <button class="btn" id="bpmDown" aria-label="tempo -">&#9664;</button>
@@ -383,6 +420,7 @@
            aria-label="nom du pattern">
     <button class="btn" id="save">Save</button>
     <button class="btn" id="bank">Bank</button>
+    <button class="btn" id="songBtn">Song</button>
     <button class="btn" id="voiceBtn">Voix</button>
     <button class="btn" id="midiBtn">MIDI</button>
     <div class="spacer"></div>
@@ -402,6 +440,53 @@
       <div class="msg" id="bankMsg"></div>
       <div class="dlg-actions">
         <button class="btn" data-close="bankOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : éditeur de song -->
+<div class="overlay" id="songOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span>Mode SONG</span></div></div>
+    <div class="dlg-body">
+      <div class="dlg-row">
+        <label for="songName">Nom</label>
+        <input class="text-input" id="songName" maxlength="60" value="SONG 01"
+               aria-label="nom de la song">
+      </div>
+      <div class="songlist" id="songItems"></div>
+      <div class="dlg-row">
+        <label for="songAddSel">Ajouter</label>
+        <select class="gem-select" id="songAddSel" style="flex:1"></select>
+        <button class="btn" id="songAddBtn">+ Ajouter</button>
+      </div>
+      <div class="chk-row">
+        <label class="chk"><input type="checkbox" id="songMode">Mode song actif (Play enchaîne les patterns)</label>
+      </div>
+      <p>Chaque ligne joue <b>×N</b> fois sa boucle avant de passer à la
+         suivante. Les patterns doivent être préalablement sauvegardés
+         dans la banque. À la fin de la liste, la lecture s'arrête.</p>
+      <div class="msg" id="songMsg"></div>
+      <div class="dlg-actions">
+        <button class="btn" id="songNew">Nouveau</button>
+        <button class="btn" id="songSave">Sauver</button>
+        <button class="btn" id="songLoadBtn">Charger…</button>
+        <button class="btn" data-close="songOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : banque de songs -->
+<div class="overlay" id="songBankOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span id="songBankTitle">Banque de songs</span></div></div>
+    <div class="dlg-body">
+      <div class="banklist" id="songBankList"></div>
+      <div class="msg" id="songBankMsg"></div>
+      <div class="dlg-actions">
+        <button class="btn" data-close="songBankOverlay">Fermer</button>
       </div>
     </div>
   </div>
@@ -527,6 +612,20 @@ TRACKS.forEach((t,i)=>{
   const inst=KIT[i%KIT.length];
   state.voices[t.id]={inst, pitch:INST_DEFAULT_PITCH[inst]};
 });
+
+// Mode song : liste ordonnée de patterns. Les patterns y sont référencés
+// par id (cloud uuid ou id local "loc-..."). bankIndex est résolu au
+// chargement du dialogue et au démarrage de la lecture en mode song.
+const songState = {
+  on:false,          // mode song armé ? (la lecture enchaîne)
+  id:null,           // id de la song en cours d'édition (null = inédite)
+  name:"SONG 01",
+  items:[],          // [{patternId, repeats}]
+  bank:[],           // patterns disponibles (résolus depuis la banque)
+  bankIndex:new Map(),
+  itemIdx:0,         // index de l'item en lecture
+  repeatLeft:0,      // répétitions restantes pour l'item courant
+};
 
 const $ = s=>document.querySelector(s);
 
@@ -851,6 +950,10 @@ function schedule(){
     visualQ.push({step:curStep,time:when});
     nextTime += dur;
     curStep = (curStep+1)%state.length;
+    // Mode song : à chaque bouclage de pattern, on avance dans la liste.
+    // La transition modifie state.grid/length/res/bpm en place ;
+    // les itérations suivantes de la boucle utilisent les nouvelles valeurs.
+    if(songState.on && curStep===0) songAdvance();
   }
   // horloge MIDI : 24 ppqn, indépendante de la résolution de grille
   if(midiCfg.clockOut && midiOut){
@@ -873,6 +976,13 @@ function visualLoop(){
 function play(){
   ensureAudio(); resumeAudio();
   if(state.playing) return;
+  if(songState.on){
+    if(!songStartPlayback()){
+      // song vide ou banque non chargée : on log et on tombe en lecture
+      // de pattern simple plutôt que d'échouer silencieusement.
+      console.warn("Mode song actif mais aucune song jouable — pattern courant utilisé.");
+    }
+  }
   state.playing=true; curStep=0;
   nextTime=ac.currentTime+0.06; clockNextTime=nextTime;
   if(midiCfg.clockOut && midiOut) midiOut.send([0xFA], perfTimeFor(nextTime)); // Start
@@ -1518,6 +1628,289 @@ $("#exportMidi").onclick=()=>{
     $("#midiMsg").textContent="Export impossible : "+err.message;
     $("#midiMsg").className="msg err";
   }
+};
+
+/* =================================================================
+   10.bis MODE SONG  (enchaînement de patterns)
+
+   La playlist est purement déclarative : { patternId, repeats }+. Au
+   bouclage d'un pattern (curStep wrap), songAdvance() décrémente
+   repeatLeft ; quand il atteint 0, on charge le pattern suivant via
+   applyPattern(). On accepte le petit rebuild DOM induit : il a lieu
+   au tournant d'un pattern, pas à chaque pas.
+   ================================================================= */
+const SONG_LKEY = "step-seq.songs.v1";
+
+function songLocalRead(){
+  try{ return JSON.parse(localStorage.getItem(SONG_LKEY)||"[]"); }
+  catch(_){ return []; }
+}
+function songLocalWrite(list){
+  try{ localStorage.setItem(SONG_LKEY,JSON.stringify(list)); }
+  catch(_){ /* quota plein : on accepte la perte */ }
+}
+
+async function songRefreshBank(){
+  // Récupère la banque de patterns pour résoudre les ids référencés
+  // dans la song (affichage + chargement à la volée pendant la lecture).
+  let items=[];
+  try{ items=await fetchBank(); }
+  catch(_){ items=localRead(); }
+  songState.bank=items;
+  songState.bankIndex=new Map(items.map(p=>[p.id,p]));
+  return items;
+}
+
+function songResolveName(pid){
+  const p=songState.bankIndex.get(pid);
+  return p ? (p.name||"(sans nom)") : "(introuvable)";
+}
+
+function songRenderItems(){
+  const list=$("#songItems"); list.innerHTML="";
+  if(!songState.items.length){
+    list.innerHTML='<div class="song-empty">— ajoute des patterns à la song —</div>';
+    return;
+  }
+  songState.items.forEach((it,idx)=>{
+    const isCur = songState.on && state.playing && idx===songState.itemIdx;
+    const row=document.createElement("div");
+    row.className="songrow"+(isCur?" cur":"");
+
+    const num=document.createElement("span"); num.className="si-idx";
+    num.textContent=(idx+1)+".";
+
+    const name=document.createElement("span"); name.className="si-name";
+    name.textContent=songResolveName(it.patternId);
+
+    const mul=document.createElement("span"); mul.className="si-mul"; mul.textContent="×";
+
+    const rep=document.createElement("input");
+    rep.type="number"; rep.min=1; rep.max=64; rep.value=it.repeats;
+    rep.setAttribute("aria-label","répétitions");
+    rep.onchange=()=>{
+      const v=Math.max(1,Math.min(64,+rep.value||1));
+      it.repeats=v; rep.value=v;
+    };
+
+    const up=document.createElement("button");
+    up.className="btn"; up.textContent="↑"; up.title="monter";
+    up.onclick=()=>{ if(idx<=0) return;
+      const a=songState.items; [a[idx-1],a[idx]]=[a[idx],a[idx-1]]; songRenderItems(); };
+
+    const dn=document.createElement("button");
+    dn.className="btn"; dn.textContent="↓"; dn.title="descendre";
+    dn.onclick=()=>{ if(idx>=songState.items.length-1) return;
+      const a=songState.items; [a[idx+1],a[idx]]=[a[idx],a[idx+1]]; songRenderItems(); };
+
+    const rm=document.createElement("button");
+    rm.className="btn"; rm.textContent="✕"; rm.title="retirer";
+    rm.onclick=()=>{ songState.items.splice(idx,1); songRenderItems(); };
+
+    row.append(num,name,mul,rep,up,dn,rm);
+    list.appendChild(row);
+  });
+}
+
+function songRefreshPicker(){
+  const sel=$("#songAddSel"); sel.innerHTML="";
+  if(!songState.bank.length){
+    const o=document.createElement("option");
+    o.value=""; o.textContent="(banque vide — sauve un pattern d'abord)";
+    sel.appendChild(o); sel.disabled=true; return;
+  }
+  sel.disabled=false;
+  songState.bank.forEach(p=>{
+    const o=document.createElement("option");
+    o.value=p.id; o.textContent=(p.name||"(sans nom)");
+    sel.appendChild(o);
+  });
+}
+
+async function openSong(){
+  $("#songMsg").textContent="";
+  try{ await songRefreshBank(); }
+  catch(e){ $("#songMsg").textContent=e.message; $("#songMsg").className="msg err"; }
+  $("#songName").value=songState.name||"SONG 01";
+  $("#songMode").checked=songState.on;
+  songRefreshPicker();
+  songRenderItems();
+  show("songOverlay");
+}
+
+function songAdd(){
+  const pid=$("#songAddSel").value;
+  if(!pid) return;
+  songState.items.push({patternId:pid,repeats:1});
+  songRenderItems();
+}
+
+function songSnapshot(){
+  const name=($("#songName").value||"SONG").trim().slice(0,60) || "SONG";
+  return {name, items:songState.items.map(it=>(
+    {patternId:String(it.patternId), repeats:Math.max(1,Math.min(64,it.repeats|0||1))}
+  ))};
+}
+
+async function songSave(){
+  const snap=songSnapshot();
+  if(!snap.items.length) throw new Error("Song vide");
+  songState.name=snap.name;
+  if(cloudOn()){
+    if(songState.id && !String(songState.id).startsWith("loc-")){
+      const res=await api("/songs/"+songState.id,
+                          {method:"PUT",body:JSON.stringify(snap)});
+      songState.id=res.id;
+    }else{
+      const res=await api("/songs",{method:"POST",body:JSON.stringify(snap)});
+      songState.id=res.id;
+    }
+  }else{
+    const list=songLocalRead();
+    const stamp=new Date().toISOString();
+    if(songState.id && String(songState.id).startsWith("loc-")){
+      const i=list.findIndex(s=>s.id===songState.id);
+      const updated=Object.assign({},snap,{id:songState.id,updatedAt:stamp});
+      if(i>=0) list[i]=updated; else list.unshift(updated);
+      songLocalWrite(list.slice(0,100));
+    }else{
+      const id="loc-"+Date.now();
+      list.unshift(Object.assign({id,updatedAt:stamp},snap));
+      songLocalWrite(list.slice(0,100));
+      songState.id=id;
+    }
+  }
+}
+
+async function songFetchList(){
+  if(cloudOn()) return (await api("/songs")).songs||[];
+  return songLocalRead();
+}
+
+async function songLoad(s){
+  songState.id=s.id||null;
+  songState.name=(s.name||"SONG").toString();
+  songState.items=Array.isArray(s.items)?s.items.map(it=>({
+    patternId:String(it.patternId||""),
+    repeats:Math.max(1,Math.min(64,(it.repeats|0)||1)),
+  })).filter(it=>it.patternId):[];
+  await songRefreshBank();
+  $("#songName").value=songState.name;
+  songRenderItems();
+}
+
+async function songDelete(id){
+  if(cloudOn() && !String(id).startsWith("loc-")){
+    await api("/songs/"+id,{method:"DELETE"});
+  }else{
+    songLocalWrite(songLocalRead().filter(s=>s.id!==id));
+  }
+}
+
+async function openSongBank(){
+  const list=$("#songBankList"); list.innerHTML="";
+  $("#songBankMsg").textContent="";
+  $("#songBankTitle").textContent=cloudOn()?"Songs cloud":"Songs locales";
+  let items=[];
+  try{ items=await songFetchList(); }
+  catch(e){
+    $("#songBankMsg").textContent=e.message;
+    $("#songBankMsg").className="msg err";
+  }
+  if(!items.length){
+    list.innerHTML='<div class="bank-empty">— aucune song enregistrée —</div>';
+  }else{
+    items.forEach(s=>{
+      const row=document.createElement("div"); row.className="bankrow";
+      const when=s.updatedAt?new Date(s.updatedAt)
+                   .toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}):"";
+      const n=(s.items||[]).length;
+      row.innerHTML=`<span class="bn">${escapeHtml(s.name||"—")}</span>
+        <span class="bm">${n} pat. ${when}</span>`;
+      const load=mkBtn("Load",async()=>{
+        try{ await songLoad(s); hide("songBankOverlay"); flash($("#songLoadBtn"),"OK !"); }
+        catch(e){ $("#songBankMsg").textContent=e.message;
+                  $("#songBankMsg").className="msg err"; }
+      });
+      const del =mkBtn("Del",async()=>{
+        try{ await songDelete(s.id); openSongBank(); }
+        catch(e){ $("#songBankMsg").textContent=e.message;
+                  $("#songBankMsg").className="msg err"; }
+      });
+      row.appendChild(load); row.appendChild(del);
+      list.appendChild(row);
+    });
+  }
+  show("songBankOverlay");
+}
+
+function songReset(){
+  songState.id=null;
+  songState.name="SONG 01";
+  songState.items=[];
+}
+
+// --- intégration au moteur de lecture ---
+function songStartPlayback(){
+  if(!songState.items.length) return false;
+  // À ce stade, la banque doit déjà être indexée. Si elle est vide
+  // (mode song activé sans ouvrir le dialogue), on retombe sur le
+  // pattern courant pour la première boucle.
+  songState.itemIdx=0;
+  const it=songState.items[0];
+  songState.repeatLeft=it.repeats;
+  const pat=songState.bankIndex.get(it.patternId);
+  if(pat) applyPattern(pat);
+  return true;
+}
+
+function songAdvance(){
+  // Appelé à chaque wrap de pattern. Décrémente repeatLeft ; si épuisé,
+  // passe à l'item suivant et charge son pattern en place. À la fin
+  // de la liste, on coupe la lecture.
+  songState.repeatLeft--;
+  if(songState.repeatLeft>0) return;
+  songState.itemIdx++;
+  if(songState.itemIdx>=songState.items.length){
+    songState.itemIdx=0;
+    // stop() est sûr ici : il fait clearInterval(timer), or schedule()
+    // est déjà à l'intérieur d'un tick — la prochaine itération ne se
+    // produira pas et le serveur audio finit ce qui est déjà programmé.
+    stop();
+    return;
+  }
+  const it=songState.items[songState.itemIdx];
+  songState.repeatLeft=it.repeats;
+  const pat=songState.bankIndex.get(it.patternId);
+  if(pat){
+    applyPattern(pat);
+  }else{
+    console.warn("Pattern manquant dans la song : "+it.patternId);
+  }
+  // Rafraîchit la surbrillance « item courant » si le dialogue est ouvert.
+  if($("#songOverlay").classList.contains("show")) songRenderItems();
+}
+
+// --- événements ---
+$("#songBtn").onclick=openSong;
+$("#songAddBtn").onclick=songAdd;
+$("#songMode").onchange=e=>{
+  songState.on=e.target.checked;
+  $("#songBadge").hidden=!songState.on;
+};
+$("#songSave").onclick=async()=>{
+  try{ await songSave();
+       $("#songMsg").textContent="Song sauvegardée";
+       $("#songMsg").className="msg ok"; }
+  catch(e){ $("#songMsg").textContent=e.message;
+            $("#songMsg").className="msg err"; }
+};
+$("#songLoadBtn").onclick=openSongBank;
+$("#songNew").onclick=()=>{
+  songReset();
+  $("#songName").value=songState.name;
+  songRenderItems();
+  $("#songMsg").textContent="";
 };
 
 /* =================================================================

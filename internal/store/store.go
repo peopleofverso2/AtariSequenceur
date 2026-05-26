@@ -117,3 +117,93 @@ func (s *Store) Delete(ctx context.Context, userID, id string) error {
 	}
 	return nil
 }
+
+// Song is an ordered playlist of patterns. Items is the raw JSON array
+// [{ patternId, repeats }, ...]; patternId may reference a cloud uuid or
+// a local-only id, so resolution is done client-side.
+type Song struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Items     json.RawMessage `json:"items"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+}
+
+const songCols = `id, name, items, updated_at`
+
+func scanSong(row pgx.Row) (Song, error) {
+	var s Song
+	err := row.Scan(&s.ID, &s.Name, &s.Items, &s.UpdatedAt)
+	return s, err
+}
+
+// ListSongs returns every song owned by the user, newest first.
+func (s *Store) ListSongs(ctx context.Context, userID string) ([]Song, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+songCols+`
+		   FROM songs
+		  WHERE user_id = $1
+		  ORDER BY updated_at DESC
+		  LIMIT 200`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]Song, 0, 16)
+	for rows.Next() {
+		song, err := scanSong(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, song)
+	}
+	return out, rows.Err()
+}
+
+// GetSong returns a single song owned by the user.
+func (s *Store) GetSong(ctx context.Context, userID, id string) (Song, error) {
+	song, err := scanSong(s.pool.QueryRow(ctx,
+		`SELECT `+songCols+`
+		   FROM songs
+		  WHERE user_id = $1 AND id = $2`, userID, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Song{}, ErrNotFound
+	}
+	return song, err
+}
+
+// CreateSong inserts a new song and returns it with its generated id.
+func (s *Store) CreateSong(ctx context.Context, userID string, in Song) (Song, error) {
+	return scanSong(s.pool.QueryRow(ctx,
+		`INSERT INTO songs (user_id, name, items)
+		      VALUES ($1, $2, $3)
+		   RETURNING `+songCols,
+		userID, in.Name, in.Items))
+}
+
+// UpdateSong overwrites an existing song owned by the user.
+func (s *Store) UpdateSong(ctx context.Context, userID, id string, in Song) (Song, error) {
+	res, err := scanSong(s.pool.QueryRow(ctx,
+		`UPDATE songs
+		    SET name = $3, items = $4, updated_at = now()
+		  WHERE user_id = $1 AND id = $2
+		 RETURNING `+songCols,
+		userID, id, in.Name, in.Items))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Song{}, ErrNotFound
+	}
+	return res, err
+}
+
+// DeleteSong removes a song owned by the user.
+func (s *Store) DeleteSong(ctx context.Context, userID, id string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM songs WHERE user_id = $1 AND id = $2`, userID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
