@@ -13,7 +13,9 @@ livré comme une vraie web app **Go + Cloud Run + Cloud SQL Postgres**.
 - **mode song** : enchaîne plusieurs patterns sauvegardés, chacun joué *×N* fois, avec changement de tempo/longueur à chaque pattern
 - **synthé FM 2 opérateurs par piste** : carrier + modulateur, ratio 1/8 → 16, index 0 → 24, ADSR séparé pour l'amplitude et la modulation, 4 ondes (sine/square/saw/triangle)
 - **échantillonneur** : import de fichier audio OU enregistrement micro 3 s ; lecture transposée par pitch (`playbackRate`), ADSR sur l'amplitude
-- **FM appliquée au sample** : un oscillateur module le `detune` (en cents) pour faire vibrer / déformer dynamiquement la lecture du sample
+- **FM appliquée au sample** : deux moteurs au choix — *detune* (oscillateur module le `detune` en cents, chorus/vibrato profond) ou *worklet* (vraie FM audio-rate via `AudioWorklet`, position dans le buffer modulée par un sinus à fréquence porteuse)
+- **vélocité / accent par pas** : touches **A** (accent, vel 127) / **G** (ghost, vel 50) / **N** (normal, vel 100) au survol — l'opacité du pad reflète l'intensité, et le `noteOn` MIDI sort à la bonne velocity
+- **mixer global** : gain + pan par piste, mute / solo, sauvegardé avec le pattern, appliqué en direct via un nœud `StereoPanner` par piste
 - **bibliothèque d'instruments** par utilisateur : sauvegarde / rappel de presets FM ou samples, synchronisée cloud quand on est connecté
 - comptes applicatifs : signup/login bcrypt + JWT maison (HS256), pas de dépendance d'auth tierce
 - sauvegarde des patterns, songs **et instruments** : **cloud** (Cloud SQL) quand on est connecté,
@@ -139,6 +141,8 @@ couleurs. Aucun logo ni marque Atari n'est utilisé — c'est un clin d'œil.
 - patterns partagés / publics (lecture seule via un token public)
 - export WAV hors-ligne via `OfflineAudioContext`
 - accent / vélocité par pas
-- vraie FM audio-rate sur les samples (via `AudioWorklet` — pour l'instant on modulé le `detune` en cents, ce qui donne un chorus/vibrato profond mais pas une vraie FM)
 - ~~enchaînement de patterns (mode *song*)~~ — fait, bouton **Song**
 - ~~synthé FM + samples + enregistrement micro~~ — fait, bouton **EDIT** par piste dans le panneau Voix
+- ~~vraie FM audio-rate via `AudioWorklet`~~ — fait, sélecteur *Moteur* dans le panneau Sample du synth editor
+- ~~accent / vélocité par pas~~ — fait, touches A / G / N au survol d'un pad
+- ~~mixer global (gain / pan / mute / solo)~~ — fait, bouton **Mix**

@@ -190,8 +190,14 @@
         rgba(0,0,0,.62) calc(100%/var(--n,1))),
       linear-gradient(to top,
         var(--lc) 0, var(--lc) var(--h,100%), rgba(0,0,0,0) var(--h,100%));
+    /* --vo (velocity-opacity) atténue le pad pour les ghost notes
+       et laisse intacte la couleur pour normal/accent. */
+    opacity:var(--vo,1);
     box-shadow:0 0 9px -3px var(--lc);
   }
+  /* Marqueur visuel "accent" : liseré supérieur jaune lumineux. */
+  .cell.on.acc{box-shadow:0 0 12px -2px var(--lc), inset 0 2px 0 var(--beam)}
+  /* Ghost : on garde la barre, opacity gérée plus haut. */
   .cell.on::after{                     /* liseré lumineux au sommet de la barre */
     content:"";position:absolute;left:0;right:0;height:2px;
     bottom:calc(var(--h,100%) - 2px);
@@ -418,6 +424,30 @@
   }
   @keyframes rblink{0%,49%{opacity:1}50%,100%{opacity:.2}}
 
+  /* Mixer : rangée par piste, gain + pan + M/S */
+  .mixrow{
+    display:grid;
+    grid-template-columns:24px 14px 1fr 90px 90px 32px 32px;
+    align-items:center;gap:6px;padding:6px 8px;
+    border-bottom:1px solid #1d1830;
+  }
+  .mixrow .mnum{font-size:9px;font-weight:700;color:#6f6a8c;text-align:right}
+  .mixrow .mchip{width:10px;height:10px;background:var(--lc,#fff);
+    box-shadow:0 0 6px var(--lc,#fff)}
+  .mixrow .mname{font-size:10px;font-weight:700;color:#d7d3ec;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mixrow input[type=range]{width:100%;accent-color:#1c1834}
+  .mixrow .ms-btn{
+    font-family:var(--mono);font-size:10px;font-weight:700;
+    background:var(--face);color:var(--ink);
+    border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    cursor:pointer;padding:2px;text-transform:uppercase;
+  }
+  .mixrow .ms-btn.on{
+    border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    background:var(--beam);color:var(--ink);
+  }
+
   /* infobulle de hauteur (pendant le réglage d'un pad) */
   #tip{
     position:fixed;z-index:60;pointer-events:none;display:none;
@@ -488,6 +518,7 @@
     <button class="btn" id="save">Save</button>
     <button class="btn" id="bank">Bank</button>
     <button class="btn" id="songBtn">Song</button>
+    <button class="btn" id="mixBtn">Mix</button>
     <button class="btn" id="voiceBtn">Voix</button>
     <button class="btn" id="midiBtn">MIDI</button>
     <div class="spacer"></div>
@@ -554,6 +585,25 @@
       <div class="msg" id="songBankMsg"></div>
       <div class="dlg-actions">
         <button class="btn" data-close="songBankOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : mixer global -->
+<div class="overlay" id="mixOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span>Mixer</span></div></div>
+    <div class="dlg-body">
+      <p style="font-size:11px;line-height:1.5;margin:0">
+        Niveau et panoramique par piste. <b>M</b> : mute, <b>S</b> : solo
+        (les pistes non-solo sont coupées si au moins une est armée).
+        Les changements s'appliquent en direct et sont sauvegardés avec le pattern.
+      </p>
+      <div class="songlist" id="mixList" style="max-height:60vh"></div>
+      <div class="dlg-actions">
+        <button class="btn" id="mixReset">Reset niveaux</button>
+        <button class="btn" data-close="mixOverlay">Fermer</button>
       </div>
     </div>
   </div>
@@ -680,10 +730,18 @@
           <span class="readout" id="sampAmpROut">0.05</span>
         </div>
 
-        <h4>FM appliquée au sample (détune en cents)</h4>
+        <h4>FM appliquée au sample</h4>
         <div class="knobrow">
           <label>Activer</label>
           <label class="chk" style="margin:0"><input type="checkbox" id="sfmOn"></label>
+          <span></span>
+        </div>
+        <div class="knobrow">
+          <label>Moteur</label>
+          <select class="gem-select" id="sfmEngine">
+            <option value="detune">Detune (cents, chorus/vibrato)</option>
+            <option value="worklet">Worklet (vraie FM audio-rate)</option>
+          </select>
           <span></span>
         </div>
         <div class="knobrow"><label>Mod wave</label>
@@ -854,12 +912,19 @@ const INST_DEFAULT_PITCH = {
 // alias de rétro-compatibilité : anciens patterns (6 pistes nommées)
 const LEGACY_ID = {t1:"kick",t2:"snare",t3:"hat",t4:"open",t5:"blip",t6:"bass"};
 
+// Niveaux de vélocité par défaut.
+const VEL_GHOST=50, VEL_NORMAL=100, VEL_ACCENT=127;
+
 const state = {bpm:120, swing:0, playing:false, name:"PATTERN 01",
-               length:16, res:4, grid:{}, subdiv:{}, mutes:{}, voices:{}};
+               length:16, res:4, grid:{}, subdiv:{}, vel:{}, mutes:{},
+               solo:{}, mix:{}, voices:{}};
 TRACKS.forEach((t,i)=>{
   state.grid[t.id]=new Array(state.length).fill(0);
   state.subdiv[t.id]=new Array(state.length).fill(1);   // 1-4 retriggers per step
+  state.vel[t.id]=new Array(state.length).fill(VEL_NORMAL); // 0..127
   state.mutes[t.id]=false;
+  state.solo[t.id]=false;
+  state.mix[t.id]={gain:0.8, pan:0};                    // niveau + panoramique par piste
   const inst=KIT[i%KIT.length];
   state.voices[t.id]={inst, pitch:INST_DEFAULT_PITCH[inst]};
 });
@@ -915,45 +980,46 @@ const PITCH_MIN=24, PITCH_MAX=84;            // C1 .. C6
 const noteName=m=>NOTE_NAMES[((m%12)+12)%12]+(Math.floor(m/12)-1);
 const noteFreq=m=>440*Math.pow(2,(m-69)/12);
 
-/* --- instruments : chaque play(t,f) reçoit une fréquence en Hz --- */
-function iKick(t,f){
+/* --- instruments : chaque play(t,f,dest) reçoit une fréquence Hz et le
+   nœud de destination (gain par-note câblé sur la sortie de piste). */
+function iKick(t,f,dest){
   const o=osc("square",f*3.4,t), g=ac.createGain();
   o.frequency.exponentialRampToValueAtTime(Math.max(20,f),t+0.13);
   g.gain.setValueAtTime(0.9,t);
   g.gain.exponentialRampToValueAtTime(0.001,t+0.21);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.23);
+  o.connect(g); g.connect(dest); o.start(t); o.stop(t+0.23);
 }
-function iSnare(t,f){
+function iSnare(t,f,dest){
   const n=noiseSrc(), nf=ac.createBiquadFilter(), ng=ac.createGain();
   nf.type="highpass"; nf.frequency.value=1300;
   ng.gain.setValueAtTime(0.7,t);
   ng.gain.exponentialRampToValueAtTime(0.001,t+0.16);
-  n.connect(nf); nf.connect(ng); ng.connect(master); n.start(t); n.stop(t+0.18);
+  n.connect(nf); nf.connect(ng); ng.connect(dest); n.start(t); n.stop(t+0.18);
   const o=osc("triangle",f,t), og=ac.createGain();
   og.gain.setValueAtTime(0.45,t);
   og.gain.exponentialRampToValueAtTime(0.001,t+0.09);
-  o.connect(og); og.connect(master); o.start(t); o.stop(t+0.1);
+  o.connect(og); og.connect(dest); o.start(t); o.stop(t+0.1);
 }
-function iHat(t,f,open){
+function iHat(t,f,dest,open){
   const dur=open?0.30:0.05;
   const n=noiseSrc(), flt=ac.createBiquadFilter(), g=ac.createGain();
   flt.type="highpass";
   flt.frequency.value=Math.min(14000,Math.max(800,f*14));   // la note règle l'éclat
   g.gain.setValueAtTime(open?0.36:0.5,t);
   g.gain.exponentialRampToValueAtTime(0.001,t+dur);
-  n.connect(flt); flt.connect(g); g.connect(master); n.start(t); n.stop(t+dur+0.02);
+  n.connect(flt); flt.connect(g); g.connect(dest); n.start(t); n.stop(t+dur+0.02);
 }
-function iTom(t,f){
+function iTom(t,f,dest){
   const o=osc("square",f*1.5,t), g=ac.createGain();
   o.frequency.exponentialRampToValueAtTime(Math.max(20,f),t+0.18);
   g.gain.setValueAtTime(0.7,t);
   g.gain.exponentialRampToValueAtTime(0.001,t+0.26);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.28);
+  o.connect(g); g.connect(dest); o.start(t); o.stop(t+0.28);
 }
-function iClap(t,f){
+function iClap(t,f,dest){
   const flt=ac.createBiquadFilter(); flt.type="bandpass";
   flt.frequency.value=Math.min(8000,f*2.4); flt.Q.value=1.2;
-  flt.connect(master);
+  flt.connect(dest);
   [0,0.012,0.024].forEach((d,i)=>{                          // trois micro-éclats
     const n=noiseSrc(), g=ac.createGain();
     g.gain.setValueAtTime(0.5-i*0.12,t+d);
@@ -961,35 +1027,37 @@ function iClap(t,f){
     n.connect(g); g.connect(flt); n.start(t+d); n.stop(t+d+0.12);
   });
 }
-function iBlip(t,f){
+function iBlip(t,f,dest){
   const o=osc("square",f,t), g=ac.createGain();
   o.frequency.setValueAtTime(f*1.334,t+0.035);   // mini arpège 8-bit
   env(g,t,0.32,0.13);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.14);
+  o.connect(g); g.connect(dest); o.start(t); o.stop(t+0.14);
 }
-function iBass(t,f){
+function iBass(t,f,dest){
   const o=osc("square",f,t), g=ac.createGain();
   env(g,t,0.5,0.21);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.23);
+  o.connect(g); g.connect(dest); o.start(t); o.stop(t+0.23);
 }
-function iLead(t,f){
+function iLead(t,f,dest){
   const o=osc("sawtooth",f,t), g=ac.createGain();
   env(g,t,0.26,0.20);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.22);
+  o.connect(g); g.connect(dest); o.start(t); o.stop(t+0.22);
 }
-function iPluck(t,f){
+function iPluck(t,f,dest){
   const o=osc("triangle",f,t), g=ac.createGain();
   o.frequency.setValueAtTime(f*2,t);
   o.frequency.exponentialRampToValueAtTime(f,t+0.04);
   env(g,t,0.5,0.12);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+0.14);
+  o.connect(g); g.connect(dest); o.start(t); o.stop(t+0.14);
 }
-/* catalogue : drum=true -> percussion (la hauteur "accorde" le timbre) */
+/* catalogue : drum=true -> percussion (la hauteur "accorde" le timbre).
+   Toutes les fonctions reçoivent désormais (t,f,dest) — dest est le
+   gain par-note câblé sur la sortie de piste (mixer + vélocité). */
 const INSTRUMENTS = {
   kick: {name:"KICK",  drum:true,  play:iKick},
   snare:{name:"SNARE", drum:true,  play:iSnare},
-  hat:  {name:"HAT",   drum:true,  play:(t,f)=>iHat(t,f,false)},
-  open: {name:"OPEN",  drum:true,  play:(t,f)=>iHat(t,f,true)},
+  hat:  {name:"HAT",   drum:true,  play:(t,f,d)=>iHat(t,f,d,false)},
+  open: {name:"OPEN",  drum:true,  play:(t,f,d)=>iHat(t,f,d,true)},
   tom:  {name:"TOM",   drum:true,  play:iTom},
   clap: {name:"CLAP",  drum:true,  play:iClap},
   blip: {name:"BLIP",  drum:false, play:iBlip},
@@ -1043,7 +1111,8 @@ function defaultSampleVoice(pitch){
     sample:{
       name:"(vide)", basePitch:60, data:"",
       amp:{a:0.005, d:0.10, s:1, r:0.05},
-      fm:{enabled:false, modulatorWave:"sine", ratio:1, depth:0,
+      fm:{enabled:false, engine:"detune", modulatorWave:"sine",
+          ratio:1, depth:0,
           env:{a:0.005, d:0.15, s:0, r:0.05}},
     },
   };
@@ -1136,7 +1205,7 @@ function adsrTo(param, env, peak, t, holdEnd){
   return tR;
 }
 
-function triggerFM(t, pitch, fm, dur){
+function triggerFM(t, pitch, fm, dur, dest){
   const freq=noteFreq(pitch), modFreq=freq*(fm.ratio||1);
   const car=ac.createOscillator(); car.type=fm.carrierWave||"sine";
   car.frequency.value=freq;
@@ -1145,7 +1214,7 @@ function triggerFM(t, pitch, fm, dur){
   const modAmt=ac.createGain(); modAmt.gain.value=0;
   mod.connect(modAmt).connect(car.frequency);
   const amp=ac.createGain(); amp.gain.value=0.0001;
-  car.connect(amp).connect(master);
+  car.connect(amp).connect(dest);
 
   const holdEnd=t+Math.max(0.05,dur);
   const tAmpEnd=adsrTo(amp.gain, fm.amp, 0.5, t, holdEnd);
@@ -1157,7 +1226,7 @@ function triggerFM(t, pitch, fm, dur){
   car.stop(stop); mod.stop(stop);
 }
 
-function triggerSample(t, pitch, sample, dur){
+function triggerSample(t, pitch, sample, dur, dest){
   const buf=sample._buf;
   if(!buf){
     // décodage encore en cours : on tente de l'amorcer pour la prochaine fois.
@@ -1166,17 +1235,21 @@ function triggerSample(t, pitch, sample, dur){
     });
     return;
   }
+  // Engine "worklet" = vraie FM audio-rate ; fallback = detune mod (chorus/vibrato).
+  if(sample.fm && sample.fm.enabled && sample.fm.engine==="worklet"){
+    triggerSampleWorklet(t, pitch, sample, dur, dest, buf);
+    return;
+  }
   const src=ac.createBufferSource(); src.buffer=buf;
   src.playbackRate.value=noteFreq(pitch)/noteFreq(sample.basePitch||60);
 
   const amp=ac.createGain(); amp.gain.value=0.0001;
-  src.connect(amp).connect(master);
+  src.connect(amp).connect(dest);
   const holdEnd=t+Math.max(0.05,dur);
   const tAmpEnd=adsrTo(amp.gain, sample.amp, 0.9, t, holdEnd);
 
-  // FM-of-sample : un oscillateur module le detune (en cents) — pas de
-  // vraie FM audio-rate sans AudioWorklet, mais ça donne un effet
-  // chorus/vibrato profond très utilisable.
+  // FM-of-sample (mode "detune") : un oscillateur module le detune (cents).
+  // Pas de vraie FM audio-rate, mais un chorus/vibrato profond utilisable.
   if(sample.fm && sample.fm.enabled){
     const sfm=sample.fm;
     const mod=ac.createOscillator(); mod.type=sfm.modulatorWave||"sine";
@@ -1194,19 +1267,190 @@ function triggerSample(t, pitch, sample, dur){
   src.stop(Math.min(naturalEnd, tAmpEnd)+0.05);
 }
 
-function trigger(id,t,pitch){
+// Sortie par piste : gain * pan en série ; créée à la demande pour ne pas
+// allouer pour des pistes muettes. Reflète state.mix et state.mutes/solo.
+const _trackNodes = {};
+function trackOutput(trackId){
+  if(!ac) return null;
+  if(!_trackNodes[trackId]){
+    const g=ac.createGain();
+    const p=ac.createStereoPanner();
+    g.connect(p).connect(master);
+    _trackNodes[trackId]={gain:g, pan:p};
+  }
+  applyMix(trackId);
+  return _trackNodes[trackId].gain;
+}
+
+// Reporte state.mix[id] (gain + pan + mute/solo) sur les nodes.
+function applyMix(trackId){
+  const n=_trackNodes[trackId]; if(!n) return;
+  const m=state.mix[trackId]||{gain:0.8,pan:0};
+  const audible = computeAudible(trackId);
+  n.gain.gain.value = audible ? (+m.gain||0) : 0;
+  n.pan.pan.value   = Math.max(-1,Math.min(1,+m.pan||0));
+}
+function applyAllMix(){ TRACKS.forEach(t=>applyMix(t.id)); }
+
+// solo-aware : si au moins un solo est actif, seuls les solos jouent.
+function computeAudible(trackId){
+  if(state.mutes[trackId]) return false;
+  const anySolo=TRACKS.some(t=>state.solo[t.id]);
+  if(anySolo && !state.solo[trackId]) return false;
+  return true;
+}
+
+/* ---- Vraie FM audio-rate sur sample, via AudioWorklet ------------
+   Le processor lit le buffer à une position modulée par un sinus
+   audio-rate (modFreq, modIndex en échantillons). Le démarrage est
+   précis à l'échantillon près grâce au compteur `startAt` envoyé en
+   processorOptions (workaround : AudioWorkletNode n'a pas de start(t)).
+   ----------------------------------------------------------------- */
+const FM_WORKLET_SRC = `
+class FMSampleProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors(){
+    return [
+      { name:'playbackRate', defaultValue:1,   automationRate:'k-rate' },
+      { name:'modFreq',      defaultValue:220, automationRate:'k-rate' },
+      { name:'modIndex',     defaultValue:0,   automationRate:'k-rate' },
+    ];
+  }
+  constructor(opts){
+    super();
+    const o=opts.processorOptions||{};
+    this.buffer = o.buffer || new Float32Array(0);
+    this.bufLen = this.buffer.length;
+    this.pos = 0;
+    this.modPhase = 0;
+    this.startAt = o.startAt|0;     // échantillons de silence avant de jouer
+    this.done = false;
+  }
+  process(_, outs, p){
+    const out = outs[0][0];
+    const rate = p.playbackRate[0];
+    const mfHz = p.modFreq[0];
+    const idx  = p.modIndex[0];
+    const sr = sampleRate;
+    for(let i=0;i<out.length;i++){
+      if(this.startAt > 0){ out[i]=0; this.startAt--; continue; }
+      if(this.done){ out[i]=0; continue; }
+      this.modPhase += 2*Math.PI*mfHz/sr;
+      if(this.modPhase > Math.PI*2) this.modPhase -= Math.PI*2;
+      const mod = Math.sin(this.modPhase);
+      const p2 = this.pos + idx*mod;
+      if(p2 < 0 || p2 >= this.bufLen-1){
+        out[i] = 0;
+      } else {
+        const ii = p2|0, fr = p2 - ii;
+        out[i] = this.buffer[ii]*(1-fr) + this.buffer[ii+1]*fr;
+      }
+      this.pos += rate;
+      if(this.pos >= this.bufLen){ this.done = true; }
+    }
+    return !this.done;
+  }
+}
+registerProcessor('fm-sample', FMSampleProcessor);
+`;
+let _workletReady = null;
+async function ensureWorklet(){
+  ensureAudio();
+  if(_workletReady) return _workletReady;
+  if(!ac.audioWorklet){
+    _workletReady = Promise.reject(new Error("AudioWorklet non supporté"));
+    return _workletReady;
+  }
+  const url=URL.createObjectURL(new Blob([FM_WORKLET_SRC],{type:"application/javascript"}));
+  _workletReady = ac.audioWorklet.addModule(url);
+  return _workletReady;
+}
+
+function triggerSampleWorklet(t, pitch, sample, dur, dest, buf){
+  if(!_workletReady){ ensureWorklet(); return; }   // pas prêt -> on saute
+  let ready=false;
+  _workletReady.then(()=>{ready=true;}).catch(()=>{});
+  if(!ready){
+    // worklet en cours d'enregistrement : fallback detune pour cette note.
+    return triggerSampleDetuneFallback(t, pitch, sample, dur, dest, buf);
+  }
+  try{
+    // On copie le buffer pour que le worklet le possède (transfer-friendly).
+    const ch = buf.getChannelData(0);
+    const data = new Float32Array(ch);
+    const playRate = noteFreq(pitch)/noteFreq(sample.basePitch||60);
+    const modHz = noteFreq(pitch)*(sample.fm.ratio||1);
+    // depth est en cents en mode detune ; en mode worklet on le ré-échelle
+    // en échantillons : depth=2400 (2 octaves) -> ~rate*buf.length*0.5 max.
+    const modIdxSamples = (sample.fm.depth||0) * (ac.sampleRate/1200) * 0.5;
+    const startAt = Math.max(0, Math.round((t - ac.currentTime)*ac.sampleRate));
+
+    const node = new AudioWorkletNode(ac, 'fm-sample', {
+      processorOptions: { buffer:data, startAt },
+      parameterData: {
+        playbackRate: playRate,
+        modFreq: modHz,
+        modIndex: modIdxSamples,
+      },
+    });
+    const amp=ac.createGain(); amp.gain.value=0.0001;
+    node.connect(amp).connect(dest);
+    const holdEnd=t+Math.max(0.05,dur);
+    const tAmpEnd=adsrTo(amp.gain, sample.amp, 0.9, t, holdEnd);
+    // Le worklet s'éteint tout seul quand `pos >= bufLen` (return false).
+    // Garde-fou : on retire le node après ampEnd + duration buffer + marge.
+    const naturalEnd=t + (buf.duration/Math.max(0.0001,playRate));
+    setTimeout(()=>{ try{ node.disconnect(); }catch(_){}; },
+      (Math.max(tAmpEnd,naturalEnd)-ac.currentTime)*1000 + 200);
+  }catch(err){
+    console.warn("worklet trigger failed",err);
+  }
+}
+
+// Fallback identique à l'engine detune (pour les cas où le worklet n'est
+// pas encore prêt — première note après ouverture de la page).
+function triggerSampleDetuneFallback(t, pitch, sample, dur, dest, buf){
+  const src=ac.createBufferSource(); src.buffer=buf;
+  src.playbackRate.value=noteFreq(pitch)/noteFreq(sample.basePitch||60);
+  const amp=ac.createGain(); amp.gain.value=0.0001;
+  src.connect(amp).connect(dest);
+  const holdEnd=t+Math.max(0.05,dur);
+  const tAmpEnd=adsrTo(amp.gain, sample.amp, 0.9, t, holdEnd);
+  if(sample.fm && sample.fm.enabled){
+    const mod=ac.createOscillator(); mod.type=sample.fm.modulatorWave||"sine";
+    mod.frequency.value=noteFreq(pitch)*(sample.fm.ratio||1);
+    const modGain=ac.createGain(); modGain.gain.value=0;
+    mod.connect(modGain).connect(src.detune);
+    const tModEnd=adsrTo(modGain.gain, sample.fm.env, sample.fm.depth||0, t, holdEnd);
+    mod.start(t); mod.stop(Math.max(tAmpEnd,tModEnd)+0.05);
+  }
+  src.start(t);
+  const naturalEnd=t + (buf.duration/Math.max(0.0001,src.playbackRate.value));
+  src.stop(Math.min(naturalEnd, tAmpEnd)+0.05);
+}
+
+function trigger(id, t, pitch, velocity){
   const v=state.voices[id];
   if(!v) return;
-  // Rétro-compat : voix sans `type` -> chiptune builtin.
+  if(state.mutes[id]) return;
+  // solo : si au moins une piste est en solo, on coupe les autres
+  if(TRACKS.some(tr=>state.solo[tr.id]) && !state.solo[id]) return;
+
+  // gain par-note : encapsule la vélocité (et permet aux engines de se
+  // brancher sur un seul point qui rejoint ensuite la sortie de piste).
+  const dest=trackOutput(id);
+  const vGain=ac.createGain();
+  vGain.gain.value=Math.max(0,Math.min(1.27,(velocity|0||VEL_NORMAL)/100));
+  vGain.connect(dest);
+
   if(!v.type || v.type==="builtin"){
     const inst=INSTRUMENTS[v.inst];
-    if(inst) inst.play(t, noteFreq(pitch));
+    if(inst) inst.play(t, noteFreq(pitch), vGain);
     return;
   }
   if(v.type==="fm" && v.fm){
-    triggerFM(t, pitch, v.fm, stepDur());
+    triggerFM(t, pitch, v.fm, stepDur(), vGain);
   }else if(v.type==="sample" && v.sample){
-    triggerSample(t, pitch, v.sample, stepDur());
+    triggerSample(t, pitch, v.sample, stepDur(), vGain);
   }
 }
 
@@ -1249,8 +1493,9 @@ function normalizeVoice(v, idx){
     sample.basePitch=clampPitch(sample.basePitch|0||60);
     sample.fm.modulatorWave=FM_WAVES.includes(sample.fm.modulatorWave)
                             ?sample.fm.modulatorWave:"sine";
+    sample.fm.engine = (sample.fm.engine==="worklet") ? "worklet" : "detune";
     sample.fm.ratio=Math.max(FM_RATIO_MIN,Math.min(FM_RATIO_MAX,+sample.fm.ratio||1));
-    sample.fm.depth=Math.max(0,Math.min(2400,+sample.fm.depth||0));  // en cents
+    sample.fm.depth=Math.max(0,Math.min(2400,+sample.fm.depth||0));  // 0..2400
     return {type:"sample", pitch:clampPitch(v.pitch|0||60), sample};
   }
   // type inconnu : fallback builtin.
@@ -1367,12 +1612,13 @@ function midiPlayNote(note){
 function perfTimeFor(audioTime){
   return performance.now() + (audioTime - ac.currentTime)*1000;
 }
-function midiSendNote(id, ch, audioTime, stepSec, note){
+function midiSendNote(id, ch, audioTime, stepSec, note, vel){
   if(!midiOut) return;
   const on   = perfTimeFor(audioTime);
   const gate = Math.min(stepSec*0.9, 0.12)*1000;     // note courte
-  midiOut.send([0x90|ch, note, 100], on);
-  midiOut.send([0x80|ch, note, 0],   on+gate);
+  const v=Math.max(1,Math.min(127,(vel|0)||100));
+  midiOut.send([0x90|ch, note, v], on);
+  midiOut.send([0x80|ch, note, 0], on+gate);
 }
 function midiPanic(){
   if(!midiOut) return;
@@ -1448,10 +1694,11 @@ function schedule(){
       if(!p || state.mutes[t.id]) return;
       const d=state.subdiv[t.id][curStep]||1;   // 1-4 répétitions dans le pas
       const sub=dur/d;
+      const vel=(state.vel[t.id] && state.vel[t.id][curStep])|0 || VEL_NORMAL;
       for(let k=0;k<d;k++){
         const tt=when + k*sub;
-        if(midiCfg.audio)    trigger(t.id,tt,p);
-        if(midiCfg.notesOut) midiSendNote(t.id,i%16,tt,sub,p);
+        if(midiCfg.audio)    trigger(t.id,tt,p,vel);
+        if(midiCfg.notesOut) midiSendNote(t.id,i%16,tt,sub,p,vel);
       }
     });
     visualQ.push({step:curStep,time:when});
@@ -1568,13 +1815,19 @@ function updateCellEl(id,s){
   const c=cellEls[id][s], p=state.grid[id][s];
   if(p){
     const d=state.subdiv[id][s]||1;
+    const vel=(state.vel[id] && state.vel[id][s])|0 || VEL_NORMAL;
+    // Opacité du pad : 0.35 (ghost) -> 1.0 (accent).
+    const opa=Math.max(0.35, Math.min(1, vel/100));
     c.classList.add("on");
+    c.classList.toggle("acc", vel>=VEL_ACCENT-1);
+    c.classList.toggle("gho", vel<=VEL_GHOST+1);
     c.style.setProperty("--h",pitchPct(p)+"%");
     c.style.setProperty("--n",d);                 // nombre de sous-pas
     c.style.setProperty("--lw",d>1?"1.6px":"0px"); // largeur des séparateurs
-    c.dataset.note=noteName(p)+(d>1?"·"+d:"");
+    c.style.setProperty("--vo",opa.toFixed(3));
+    c.dataset.note=noteName(p)+(d>1?"·"+d:"")+(vel!==VEL_NORMAL?" v"+vel:"");
   }else{
-    c.classList.remove("on");
+    c.classList.remove("on","acc","gho");
     delete c.dataset.note;
   }
 }
@@ -1585,6 +1838,12 @@ function setCell(id,s,pitch){
 /* subdivision d'un pas : 1 = simple, 2-4 = répétitions régulières (croches, etc.) */
 function setDiv(id,s,div){
   state.subdiv[id][s]=Math.max(1,Math.min(4,div|0));
+  updateCellEl(id,s);
+}
+/* vélocité d'un pas : 0..127 (50 ghost, 100 normal, 127 accent). */
+function setVel(id,s,v){
+  v=Math.max(0,Math.min(127,v|0));
+  state.vel[id][s]=v;
   updateCellEl(id,s);
 }
 function refreshGrid(){
@@ -1616,9 +1875,13 @@ function setLength(n){
   TRACKS.forEach(t=>{
     const old=state.grid[t.id], na=new Array(n).fill(0);
     const odv=state.subdiv[t.id], nd=new Array(n).fill(1);
-    for(let s=0;s<Math.min(n,old.length);s++){ na[s]=old[s]; nd[s]=odv[s]||1; }
+    const ovl=state.vel[t.id]||[], nv=new Array(n).fill(VEL_NORMAL);
+    for(let s=0;s<Math.min(n,old.length);s++){
+      na[s]=old[s]; nd[s]=odv[s]||1; nv[s]=ovl[s]||VEL_NORMAL;
+    }
     state.grid[t.id]=na;
     state.subdiv[t.id]=nd;
+    state.vel[t.id]=nv;
   });
   state.length=n;
   if(curStep>=n) curStep=0;
@@ -1642,9 +1905,9 @@ let drag=null;                      // pad en cours de réglage
 let hoverCell=null, hoverEl=null;   // pad sous le curseur (cible clavier)
 let tipTimer=null;
 
-function auditionNote(id,pitch){
+function auditionNote(id,pitch,vel){
   ensureAudio(); resumeAudio();
-  trigger(id, ac.currentTime+0.02, pitch);
+  trigger(id, ac.currentTime+0.02, pitch, vel|0||VEL_NORMAL);
 }
 function auditionRatchet(id,pitch,d){
   ensureAudio(); resumeAudio();
@@ -1805,6 +2068,17 @@ document.addEventListener("keydown",e=>{
     setCell(id,s, cur?0:state.voices[id].pitch);
   }else if(e.code==="Delete" || e.code==="Backspace"){
     e.preventDefault(); setCell(id,s,0);
+  }else if(e.code==="KeyA" || e.code==="KeyG" || e.code==="KeyN"){
+    // accent / ghost / normal — n'agit que sur un pad allumé.
+    e.preventDefault();
+    if(!state.grid[id][s]) return;
+    let v=VEL_NORMAL;
+    if(e.code==="KeyA") v=VEL_ACCENT;
+    else if(e.code==="KeyG") v=VEL_GHOST;
+    setVel(id,s,v);
+    auditionNote(id,state.grid[id][s],v);
+    tipForCell(id,s);
+    clearTimeout(tipTimer); tipTimer=setTimeout(hideTip,900);
   }
 });
 
@@ -1909,10 +2183,11 @@ function localWrite(list){
   catch(_){ memBank=list; }
 }
 function snapshot(){
-  // grille + voix + longueur + résolution sont rangées dans le jsonb
-  // "steps" -> aucune modification du backend nécessaire.
+  // grille + voix + longueur + résolution + vel + mix sont rangées dans
+  // le jsonb "steps" : pas de modif backend nécessaire (jsonb opaque).
   return {name:state.name||"PATTERN", bpm:state.bpm, swing:state.swing,
-          steps:{grid:state.grid, subdiv:state.subdiv, voices:state.voices,
+          steps:{grid:state.grid, subdiv:state.subdiv, vel:state.vel,
+                 voices:state.voices, mix:state.mix,
                  length:state.length, res:state.res}};
 }
 function applyPattern(p){
@@ -1922,10 +2197,12 @@ function applyPattern(p){
   $("#swing").value=state.swing;
 
   // rétro-compat : ancien format -> "steps" EST la grille ;
-  // nouveau format -> {grid, voices, length, res}.
+  // nouveau format -> {grid, voices, length, res, vel, mix}.
   const raw=p.steps||{};
   const grid=raw.grid||raw, voices=raw.voices||null;
-  const subs=raw.subdiv||null;       // peut manquer (anciens patterns)
+  const subs=raw.subdiv||null;
+  const vsrc=raw.vel||null;
+  const mix =raw.mix||null;
   let len=raw.length|0;
   if(!len){
     for(const k in grid)
@@ -1943,17 +2220,29 @@ function applyPattern(p){
     const def=state.voices[t.id].pitch;
     const src=grid[t.id]||grid[LEGACY_ID[t.id]]||[];
     const dsrc=(subs && (subs[t.id]||subs[LEGACY_ID[t.id]]))||[];
+    const vs=(vsrc && (vsrc[t.id]||vsrc[LEGACY_ID[t.id]]))||[];
     const a=new Array(state.length).fill(0);
     const dv=new Array(state.length).fill(1);
+    const vv=new Array(state.length).fill(VEL_NORMAL);
     for(let s=0;s<state.length;s++){
       const raw=src[s]|0;
       a[s]= raw>=PITCH_MIN ? Math.min(PITCH_MAX,raw) : (raw?def:0);
       dv[s]=Math.max(1,Math.min(4,(dsrc[s]|0)||1));
+      vv[s]=Math.max(0,Math.min(127,(vs[s]|0)||VEL_NORMAL));
     }
     state.grid[t.id]=a;
     state.subdiv[t.id]=dv;
+    state.vel[t.id]=vv;
+    // Mix : valeurs par défaut + restauration si présentes.
+    const m=(mix && mix[t.id])||{};
+    state.mix[t.id]={
+      gain:Math.max(0,Math.min(1.5,+m.gain||0.8)),
+      pan: Math.max(-1,Math.min(1,+m.pan||0)),
+    };
   });
   state.mutes && TRACKS.forEach(t=>state.mutes[t.id]=false);
+  state.solo  && TRACKS.forEach(t=>state.solo[t.id]=false);
+  applyAllMix();
   $("#pname").value=state.name;
   $("#lenOut").textContent=state.length;
   $("#resSel").value=state.res;
@@ -2546,6 +2835,7 @@ function renderSynthEditor(){
     e("#sampAmpS",v.sample.amp.s,2); e("#sampAmpR",v.sample.amp.r,2);
     fillWaveSelect($("#sfmModWave"), v.sample.fm.modulatorWave);
     $("#sfmOn").checked=!!v.sample.fm.enabled;
+    $("#sfmEngine").value=(v.sample.fm.engine==="worklet")?"worklet":"detune";
     e("#sfmRatio",v.sample.fm.ratio,2);
     $("#sfmDepth").value=v.sample.fm.depth;
     $("#sfmDepthOut").textContent=v.sample.fm.depth|0;
@@ -2628,6 +2918,13 @@ bindFloat("#sampAmpS", null, v=>{ vSamp().amp.s=v; }, 2);
 bindFloat("#sampAmpR", null, v=>{ vSamp().amp.r=v; }, 2);
 $("#sfmOn").onchange=e=>{ vSamp().fm.enabled=e.target.checked; };
 $("#sfmModWave").onchange=e=>{ vSamp().fm.modulatorWave=e.target.value; };
+$("#sfmEngine").onchange=e=>{
+  vSamp().fm.engine=e.target.value;
+  if(e.target.value==="worklet") ensureWorklet().catch(err=>{
+    $("#synthEdMsg").textContent="Worklet indisponible : "+err.message;
+    $("#synthEdMsg").className="msg err";
+  });
+};
 bindFloat("#sfmRatio", null, v=>{ vSamp().fm.ratio=v; }, 2);
 $("#sfmDepth").addEventListener("input",()=>{
   const v=+$("#sfmDepth").value; vSamp().fm.depth=v; $("#sfmDepthOut").textContent=v|0;
@@ -2828,6 +3125,64 @@ async function openInstLib(){
   show("instLibOverlay");
 }
 $("#synthEdLib").onclick=openInstLib;
+
+/* =================================================================
+   10.quater MIXER : gain + pan par piste, mute / solo
+
+   Le mixer reflète state.mix[id] = {gain, pan} et le drapeau
+   state.solo[id]. Toute modif est appliquée en direct via applyMix().
+   ================================================================= */
+function buildMixRows(){
+  const list=$("#mixList"); list.innerHTML="";
+  TRACKS.forEach((t,idx)=>{
+    const m=state.mix[t.id]||(state.mix[t.id]={gain:0.8,pan:0});
+    const row=document.createElement("div");
+    row.className="mixrow"; row.style.setProperty("--lc",t.color);
+
+    const num=document.createElement("span"); num.className="mnum";
+    num.textContent=idx+1;
+    const chip=document.createElement("span"); chip.className="mchip";
+    const name=document.createElement("span"); name.className="mname";
+    name.textContent=voiceShortName(state.voices[t.id]);
+
+    const gain=document.createElement("input");
+    gain.type="range"; gain.min="0"; gain.max="1.5"; gain.step="0.01";
+    gain.value=m.gain; gain.title="gain";
+    gain.oninput=()=>{ m.gain=+gain.value; applyMix(t.id); };
+
+    const pan=document.createElement("input");
+    pan.type="range"; pan.min="-1"; pan.max="1"; pan.step="0.05";
+    pan.value=m.pan; pan.title="panoramique";
+    pan.oninput=()=>{ m.pan=+pan.value; applyMix(t.id); };
+
+    const muteBtn=document.createElement("button");
+    muteBtn.className="ms-btn"+(state.mutes[t.id]?" on":"");
+    muteBtn.textContent="M"; muteBtn.title="mute";
+    muteBtn.onclick=()=>{
+      state.mutes[t.id]=!state.mutes[t.id];
+      muteBtn.classList.toggle("on",state.mutes[t.id]);
+      applyAllMix();   // solo dépend de l'état des autres pistes
+      refreshLabels();
+    };
+    const soloBtn=document.createElement("button");
+    soloBtn.className="ms-btn"+(state.solo[t.id]?" on":"");
+    soloBtn.textContent="S"; soloBtn.title="solo";
+    soloBtn.onclick=()=>{
+      state.solo[t.id]=!state.solo[t.id];
+      soloBtn.classList.toggle("on",state.solo[t.id]);
+      applyAllMix();
+    };
+
+    row.append(num,chip,name,gain,pan,muteBtn,soloBtn);
+    list.appendChild(row);
+  });
+}
+$("#mixBtn").onclick=()=>{ buildMixRows(); show("mixOverlay"); };
+$("#mixReset").onclick=()=>{
+  TRACKS.forEach(t=>{ state.mix[t.id]={gain:0.8,pan:0};
+                       state.mutes[t.id]=false; state.solo[t.id]=false; });
+  applyAllMix(); buildMixRows(); refreshLabels();
+};
 
 /* =================================================================
    11. DÉMARRAGE
