@@ -21,7 +21,7 @@ livré comme une vraie web app **Go + Cloud Run + Cloud SQL Postgres**.
 navigateur ──HTTP──► Cloud Run (binaire Go)
    │                      │
    │ JWT Bearer           ├─ /                  frontend embarqué (go:embed)
-   │                      ├─ /healthz           sonde Cloud Run
+   │                      ├─ /health            sonde Cloud Run
    │                      ├─ /config            feature flag "cloud"
    │                      ├─ /api/signup        bcrypt + token
    │                      ├─ /api/login         vérif + token
@@ -118,7 +118,9 @@ gcloud run deploy atari-seq \
   --set-secrets=JWT_SECRET=atari-jwt:latest
 ```
 
-Cloud Run injecte `PORT` automatiquement ; `/healthz` sert de sonde.
+Cloud Run injecte `PORT` automatiquement ; `/health` sert de sonde
+(`/healthz` est réservé par le Google Frontend sur `*.run.app` et
+renverrait un 404 avant d'atteindre le container).
 
 ## Esthétique
 

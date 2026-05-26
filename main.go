@@ -1,9 +1,10 @@
 // Command server is the HTTP entrypoint for the Atari step sequencer.
 //
 // It serves the embedded single-page frontend and a small JSON API for
-// storing sequencer patterns in Supabase Postgres. It is built to run on
-// Cloud Run: it listens on $PORT, exposes /healthz, and shuts down cleanly
-// on SIGTERM so in-flight requests are not dropped during a revision swap.
+// storing sequencer patterns and songs in Postgres (Cloud SQL in prod,
+// docker-compose locally). It is built to run on Cloud Run: it listens
+// on $PORT, exposes /health, and shuts down cleanly on SIGTERM so
+// in-flight requests are not dropped during a revision swap.
 package main
 
 import (
@@ -109,7 +110,10 @@ func run() error {
 	r.Use(middleware.Timeout(15 * time.Second))
 
 	// Liveness/readiness probe for Cloud Run (no auth, no DB dependency).
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	// Path is /health (not /healthz) because Google's frontend reserves
+	// /healthz on *.run.app and returns its own 404 before the request
+	// reaches the container.
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
