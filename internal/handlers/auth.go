@@ -82,7 +82,9 @@ func (a *API) mintResponse(u store.User) (authResponse, error) {
 	return res, nil
 }
 
-// Signup creates a new account and returns a fresh JWT.
+// Signup creates a new account and returns a fresh JWT. It also
+// claims any pending share invitations addressed to this email so the
+// friend lands in their bank automatically.
 func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
 	if !a.authReady(w) {
 		return
@@ -104,6 +106,11 @@ func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
 		}
 		writeErr(w, http.StatusInternalServerError, "could not create account")
 		return
+	}
+	// Claim pending invitations addressed to this email (best-effort).
+	if n, err := a.store.AcceptPendingSharesForEmail(r.Context(), u.ID, u.Email); err == nil && n > 0 {
+		// Logged at the call site is enough.
+		_ = n
 	}
 	res, err := a.mintResponse(u)
 	if err != nil {
@@ -133,6 +140,9 @@ func (a *API) Login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "invalid email or password")
 		return
 	}
+	// Idempotent : claim any invitations that arrived after the
+	// account was created.
+	_, _ = a.store.AcceptPendingSharesForEmail(r.Context(), u.ID, u.Email)
 	res, err := a.mintResponse(u)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not issue token")

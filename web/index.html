@@ -580,8 +580,58 @@
       <div class="dlg-actions">
         <button class="btn" id="songNew">Nouveau</button>
         <button class="btn" id="songSave">Sauver</button>
+        <button class="btn" id="songShareBtn">Inviter…</button>
         <button class="btn" id="songLoadBtn">Charger…</button>
         <button class="btn" data-close="songOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : partage de song -->
+<div class="overlay" id="shareOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title">
+      <span>Inviter &mdash; <span id="shareSongName">?</span></span>
+    </div></div>
+    <div class="dlg-body">
+      <p style="font-size:11px;line-height:1.5;margin:0">
+        Tape l'email d'un·e ami·e. Si la personne a déjà un compte,
+        la song apparaît immédiatement dans sa banque ; sinon elle
+        reçoit un lien pour s'inscrire. Tu peux aussi copier le lien
+        manuellement.
+      </p>
+      <div class="dlg-row">
+        <label for="shareEmail">Email</label>
+        <input class="text-input" id="shareEmail" type="email"
+               autocomplete="email" placeholder="ami@example.com" style="flex:1">
+        <button class="btn go" id="shareSend">Inviter</button>
+      </div>
+      <div class="msg" id="shareMsg"></div>
+      <h4 style="font-size:10px;font-weight:700;color:var(--beam);
+                 text-transform:uppercase;letter-spacing:.06em;margin:6px 0 0 0">
+        Invitations actuelles</h4>
+      <div class="banklist" id="shareList" style="max-height:240px"></div>
+      <div class="dlg-actions">
+        <button class="btn" data-close="shareOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : accueil sur lien d'invitation /accept/{token} -->
+<div class="overlay" id="acceptOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span>Invitation</span></div></div>
+    <div class="dlg-body">
+      <p style="font-size:11px;line-height:1.5;margin:0" id="acceptIntro">
+        Chargement&hellip;
+      </p>
+      <div class="msg" id="acceptMsg"></div>
+      <div class="dlg-actions">
+        <button class="btn" id="acceptLoginBtn">Se connecter…</button>
+        <button class="btn go" id="acceptConfirmBtn">Rejoindre</button>
+        <button class="btn" id="acceptCancelBtn">Plus tard</button>
       </div>
     </div>
   </div>
@@ -3275,6 +3325,158 @@ $("#mixReset").onclick=()=>{
 };
 
 /* =================================================================
+   10.quinquies PARTAGE : inviter un·e ami·e à co-éditer une song
+
+   La song doit avoir été sauvée (id non null) — sinon on demande de
+   sauver d'abord. POST /api/songs/{id}/share renvoie {acceptUrl,
+   emailSent}. On expose le lien copiable dans tous les cas.
+   ================================================================= */
+function shareMsg(t,err){
+  const m=$("#shareMsg"); m.textContent=t;
+  m.className="msg "+(err?"err":"ok");
+}
+async function openShareDialog(){
+  if(!cloudOn()){
+    alert("Connecte-toi pour partager une song."); return;
+  }
+  if(!songState.id || String(songState.id).startsWith("loc-")){
+    alert("Sauve la song en ligne d'abord (clique Sauver)."); return;
+  }
+  $("#shareSongName").textContent=songState.name||"(sans nom)";
+  $("#shareEmail").value="";
+  $("#shareMsg").textContent="";
+  await renderShareList();
+  show("shareOverlay");
+}
+async function renderShareList(){
+  const list=$("#shareList"); list.innerHTML="";
+  let items=[];
+  try{ items=(await api("/songs/"+songState.id+"/shares")).shares||[]; }
+  catch(e){ shareMsg(e.message,true); return; }
+  if(!items.length){
+    list.innerHTML='<div class="bank-empty">— personne pour l\'instant —</div>';
+    return;
+  }
+  items.forEach(sh=>{
+    const row=document.createElement("div"); row.className="bankrow";
+    const status=sh.acceptedAt?"acceptée":"en attente";
+    row.innerHTML='<span class="bn">'+escapeHtml(sh.inviteeEmail)+'</span>'+
+      '<span class="bm">'+status+'</span>';
+    if(sh.acceptUrl){
+      const copy=mkBtn("Copier lien",()=>{
+        navigator.clipboard?.writeText(sh.acceptUrl);
+        shareMsg("Lien copié",false);
+      });
+      row.appendChild(copy);
+    }
+    const rev=mkBtn("Retirer",async()=>{
+      try{ await api("/shares/"+sh.id,{method:"DELETE"});
+           await renderShareList(); shareMsg("Invitation retirée",false); }
+      catch(e){ shareMsg(e.message,true); }
+    });
+    row.appendChild(rev);
+    list.appendChild(row);
+  });
+}
+async function sendShare(){
+  const email=($("#shareEmail").value||"").trim().toLowerCase();
+  if(!email.includes("@")){ shareMsg("Email invalide",true); return; }
+  try{
+    const res=await api("/songs/"+songState.id+"/share",
+      {method:"POST",body:JSON.stringify({email})});
+    if(res.emailSent){
+      shareMsg("Email envoyé à "+email,false);
+    }else{
+      shareMsg("Invitation créée. Copie ce lien à envoyer : "+res.acceptUrl,false);
+    }
+    $("#shareEmail").value="";
+    await renderShareList();
+  }catch(e){ shareMsg(e.message,true); }
+}
+$("#songShareBtn").onclick=openShareDialog;
+$("#shareSend").onclick=sendShare;
+$("#shareEmail").addEventListener("keydown",e=>{
+  if(e.code==="Enter"){ e.preventDefault(); sendShare(); }
+});
+
+/* =================================================================
+   10.sexies ACCEPTATION : ouvre le dialogue si l'URL est /accept/{token}
+   ================================================================= */
+function getAcceptToken(){
+  const m=window.location.pathname.match(/^\/accept\/([A-Za-z0-9-]+)\/?$/);
+  return m ? m[1] : null;
+}
+async function maybeShowAccept(){
+  const token=getAcceptToken();
+  if(!token) return;
+  // Récupère sans auth l'infos de l'invitation pour personnaliser le message.
+  let preview=null;
+  try{
+    const r=await fetch("/api/shares/preview/"+encodeURIComponent(token));
+    if(r.ok) preview=await r.json();
+  }catch(_){}
+  if(!preview){
+    $("#acceptIntro").textContent="Cette invitation est invalide ou expirée.";
+    $("#acceptConfirmBtn").disabled=true;
+    $("#acceptLoginBtn").disabled=true;
+    show("acceptOverlay"); return;
+  }
+  const intro = preview.alreadyAccepted
+    ? preview.ownerEmail+" t'a invité·e à co-éditer « "+preview.resourceName+
+      " ». L'invitation est déjà acceptée — la song est dans ta banque."
+    : preview.ownerEmail+" t'invite à co-éditer la song « "+preview.resourceName+" ».";
+  $("#acceptIntro").textContent=intro;
+  $("#acceptMsg").textContent="";
+
+  const setLoggedInUI=()=>{
+    $("#acceptLoginBtn").hidden=true;
+    $("#acceptConfirmBtn").hidden=false;
+  };
+  const setLoggedOutUI=()=>{
+    $("#acceptLoginBtn").hidden=false;
+    $("#acceptConfirmBtn").hidden=true;
+    // pré-remplit l'email de signup avec celui de l'invitation
+    if(preview.inviteeEmail) $("#email").value=preview.inviteeEmail;
+  };
+  // Reflète l'état actuel et ré-évalue après login.
+  if(cloudOn()) setLoggedInUI(); else setLoggedOutUI();
+
+  $("#acceptConfirmBtn").onclick=async()=>{
+    try{
+      const sh=await api("/shares/accept/"+encodeURIComponent(token),{method:"POST"});
+      $("#acceptMsg").textContent="Song ajoutée à ta banque.";
+      $("#acceptMsg").className="msg ok";
+      // Nettoie l'URL puis recharge la banque de songs.
+      history.replaceState(null,"","/");
+      setTimeout(()=>{ hide("acceptOverlay"); openSongBank(); }, 600);
+    }catch(e){
+      $("#acceptMsg").textContent=e.message;
+      $("#acceptMsg").className="msg err";
+    }
+  };
+  $("#acceptLoginBtn").onclick=()=>{
+    hide("acceptOverlay");
+    show("authOverlay");
+    // Hook : quand le login passe, réafficher le dialogue d'accept.
+    const original=$("#doLogin").onclick;
+    $("#doLogin").onclick=async function(){
+      await original.call(this);
+      if(cloudOn()){ setLoggedInUI(); maybeShowAccept(); }
+    };
+    const originalSignup=$("#doSignup").onclick;
+    $("#doSignup").onclick=async function(){
+      await originalSignup.call(this);
+      if(cloudOn()){ setLoggedInUI(); maybeShowAccept(); }
+    };
+  };
+  $("#acceptCancelBtn").onclick=()=>{
+    history.replaceState(null,"","/");
+    hide("acceptOverlay");
+  };
+  show("acceptOverlay");
+}
+
+/* =================================================================
    11. DÉMARRAGE
    ================================================================= */
 buildGrid();
@@ -3285,7 +3487,7 @@ refreshLabels();
 [0,2,4,6,8,10,12,14].forEach(s=>state.grid.t3[s]=state.voices.t3.pitch);  // hat
 [0,7].forEach(s=>state.grid.t6[s]=state.voices.t6.pitch);                 // bass
 refreshGrid();
-initCloud();
+initCloud().then(()=>maybeShowAccept());
 </script>
 </body>
 </html>

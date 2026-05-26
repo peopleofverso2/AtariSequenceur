@@ -99,3 +99,34 @@ drop trigger if exists instruments_set_updated_at on public.instruments;
 create trigger instruments_set_updated_at
     before update on public.instruments
     for each row execute function public.set_updated_at();
+
+-- ============================================================
+-- shares : invitation à collaborer sur une ressource (song pour
+-- l'instant). Un share peut être "pending" (invitee_id NULL,
+-- accepted_at NULL) lorsqu'on invite un email sans compte ; il est
+-- résolu lors du signup/login si l'email correspond.
+--
+-- L'unicité (resource_type, resource_id, lower(invitee_email)) évite
+-- de spammer plusieurs invitations identiques pour la même song.
+-- ============================================================
+create table if not exists public.shares (
+    id            uuid primary key default gen_random_uuid(),
+    resource_type text not null check (resource_type in ('song')),
+    resource_id   uuid not null,
+    owner_id      uuid not null references public.users (id) on delete cascade,
+    invitee_id    uuid references public.users (id) on delete cascade,
+    invitee_email text not null check (char_length(invitee_email) between 3 and 254),
+    role          text not null default 'editor' check (role in ('viewer','editor')),
+    token         text not null unique,
+    created_at    timestamptz not null default now(),
+    accepted_at   timestamptz
+);
+
+create unique index if not exists shares_resource_invitee_unique
+    on public.shares (resource_type, resource_id, lower(invitee_email));
+create index if not exists shares_invitee_idx
+    on public.shares (invitee_id) where invitee_id is not null;
+create index if not exists shares_owner_idx
+    on public.shares (owner_id);
+create index if not exists shares_pending_email_idx
+    on public.shares (lower(invitee_email)) where invitee_id is null;

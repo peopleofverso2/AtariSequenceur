@@ -17,6 +17,7 @@ livré comme une vraie web app **Go + Cloud Run + Cloud SQL Postgres**.
 - **vélocité / accent par pas** : touches **A** (accent, vel 127) / **G** (ghost, vel 50) / **N** (normal, vel 100) au survol — l'opacité du pad reflète l'intensité, et le `noteOn` MIDI sort à la bonne velocity
 - **mixer global** : gain + pan par piste, mute / solo, sauvegardé avec le pattern, appliqué en direct via un nœud `StereoPanner` par piste
 - **bibliothèque d'instruments** par utilisateur : sauvegarde / rappel de presets FM ou samples, synchronisée cloud quand on est connecté
+- **partage par email** : invite un·e ami·e sur une song — la song apparaît immédiatement dans sa banque, les patterns référencés deviennent aussi accessibles, et les deux peuvent co-éditer (last-write-wins). Email automatique via **Brevo** si configuré, sinon lien copiable.
 - comptes applicatifs : signup/login bcrypt + JWT maison (HS256), pas de dépendance d'auth tierce
 - sauvegarde des patterns, songs **et instruments** : **cloud** (Cloud SQL) quand on est connecté,
   **locale** (`localStorage`) sinon — l'app reste 100 % jouable hors-ligne

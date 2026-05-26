@@ -26,8 +26,10 @@ const maxAudioBody = 8 * 1024 * 1024
 
 // API holds the dependencies of the pattern handlers.
 type API struct {
-	store *store.Store
-	auth  *auth.Auth
+	store  *store.Store
+	auth   *auth.Auth
+	mailer Mailer // optional, set by SetMailer
+	appURL string // optional, set by SetMailer for invite links
 }
 
 // New builds an API. The store may be nil when DATABASE_URL is unset, in
@@ -59,12 +61,13 @@ func (in *patternInput) normalize() error {
 	return nil
 }
 
-// ListPatterns returns every pattern owned by the caller.
+// ListPatterns returns the union of patterns the caller owns and
+// patterns referenced by songs that have been shared with them.
 func (a *API) ListPatterns(w http.ResponseWriter, r *http.Request) {
 	if !a.ready(w) {
 		return
 	}
-	items, err := a.store.List(r.Context(), auth.UserID(r.Context()))
+	items, err := a.store.AccessiblePatterns(r.Context(), auth.UserID(r.Context()))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not load patterns")
 		return
@@ -72,12 +75,13 @@ func (a *API) ListPatterns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"patterns": items})
 }
 
-// GetPattern returns one pattern by id.
+// GetPattern returns one pattern the caller can read (own or
+// shared via a song).
 func (a *API) GetPattern(w http.ResponseWriter, r *http.Request) {
 	if !a.ready(w) {
 		return
 	}
-	p, err := a.store.Get(r.Context(), auth.UserID(r.Context()), chi.URLParam(r, "id"))
+	p, err := a.store.GetShared(r.Context(), auth.UserID(r.Context()), chi.URLParam(r, "id"))
 	if a.handleErr(w, err, "could not load pattern") {
 		return
 	}
@@ -101,7 +105,8 @@ func (a *API) CreatePattern(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, p)
 }
 
-// UpdatePattern overwrites an existing pattern.
+// UpdatePattern overwrites a pattern — allowed for owners and for
+// editors granted access through a song share.
 func (a *API) UpdatePattern(w http.ResponseWriter, r *http.Request) {
 	if !a.ready(w) {
 		return
@@ -110,7 +115,7 @@ func (a *API) UpdatePattern(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := a.store.Update(r.Context(), auth.UserID(r.Context()),
+	p, err := a.store.UpdateShared(r.Context(), auth.UserID(r.Context()),
 		chi.URLParam(r, "id"), in.toPattern())
 	if a.handleErr(w, err, "could not update pattern") {
 		return
@@ -179,12 +184,13 @@ func (in songInput) toSong() store.Song {
 	return store.Song{Name: in.Name, Items: in.Items}
 }
 
-// ListSongs returns every song owned by the caller.
+// ListSongs returns the union of songs owned by the caller and songs
+// shared with them (accepted invitations only).
 func (a *API) ListSongs(w http.ResponseWriter, r *http.Request) {
 	if !a.ready(w) {
 		return
 	}
-	items, err := a.store.ListSongs(r.Context(), auth.UserID(r.Context()))
+	items, err := a.store.AccessibleSongs(r.Context(), auth.UserID(r.Context()))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not load songs")
 		return
@@ -192,12 +198,12 @@ func (a *API) ListSongs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"songs": items})
 }
 
-// GetSong returns one song by id.
+// GetSong returns one song accessible to the user (own or shared).
 func (a *API) GetSong(w http.ResponseWriter, r *http.Request) {
 	if !a.ready(w) {
 		return
 	}
-	s, err := a.store.GetSong(r.Context(), auth.UserID(r.Context()), chi.URLParam(r, "id"))
+	s, err := a.store.GetSongShared(r.Context(), auth.UserID(r.Context()), chi.URLParam(r, "id"))
 	if a.handleErr(w, err, "could not load song") {
 		return
 	}
@@ -221,7 +227,8 @@ func (a *API) CreateSong(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, s)
 }
 
-// UpdateSong overwrites an existing song.
+// UpdateSong overwrites an existing song — allowed for owners and
+// for editors granted access through a share.
 func (a *API) UpdateSong(w http.ResponseWriter, r *http.Request) {
 	if !a.ready(w) {
 		return
@@ -230,7 +237,7 @@ func (a *API) UpdateSong(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s, err := a.store.UpdateSong(r.Context(), auth.UserID(r.Context()),
+	s, err := a.store.UpdateSongShared(r.Context(), auth.UserID(r.Context()),
 		chi.URLParam(r, "id"), in.toSong())
 	if a.handleErr(w, err, "could not update song") {
 		return

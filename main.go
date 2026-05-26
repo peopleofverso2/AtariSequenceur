@@ -27,6 +27,7 @@ import (
 
 	"github.com/peopleofverso/atari-step-sequencer/internal/auth"
 	"github.com/peopleofverso/atari-step-sequencer/internal/handlers"
+	"github.com/peopleofverso/atari-step-sequencer/internal/mailer"
 	"github.com/peopleofverso/atari-step-sequencer/internal/store"
 )
 
@@ -50,13 +51,21 @@ type config struct {
 	Port        string
 	DatabaseURL string
 	JWTSecret   string
+	BrevoAPIKey string
+	EmailFrom   string
+	EmailFromName string
+	AppURL      string
 }
 
 func loadConfig() config {
 	return config{
-		Port:        env("PORT", "8080"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		JWTSecret:   os.Getenv("JWT_SECRET"),
+		Port:          env("PORT", "8080"),
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
+		JWTSecret:     os.Getenv("JWT_SECRET"),
+		BrevoAPIKey:   os.Getenv("BREVO_API_KEY"),
+		EmailFrom:     env("EMAIL_FROM", ""),
+		EmailFromName: env("EMAIL_FROM_NAME", "STEP·SEQ"),
+		AppURL:        env("APP_URL", ""),  // ex. https://atari-seq-….run.app
 	}
 }
 
@@ -102,6 +111,16 @@ func run() error {
 	}
 	api := handlers.New(st, authSvc)
 
+	// Optional mailer: if BREVO_API_KEY is missing the API still works,
+	// but the invitation endpoint returns just the URL (no email sent).
+	mail := mailer.New(cfg.BrevoAPIKey, cfg.EmailFrom, cfg.EmailFromName)
+	if !mail.Configured() {
+		slog.Warn("BREVO_API_KEY not set: invitation emails disabled (copy link only)")
+	} else {
+		slog.Info("brevo mailer ready", "from", cfg.EmailFrom)
+	}
+	api.SetMailer(mail, cfg.AppURL)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -126,11 +145,12 @@ func run() error {
 		})
 	})
 
-	// JSON API. Signup/login are public; everything else is behind the
-	// bearer-token middleware.
+	// JSON API. Signup/login + the share-preview endpoint are public;
+	// everything else is behind the bearer-token middleware.
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/signup", api.Signup)
 		r.Post("/login", api.Login)
+		api.MountSharePreviewRoute(r) // /shares/preview/{token} — no auth
 		r.Group(func(r chi.Router) {
 			r.Use(authSvc.Middleware)
 			r.Get("/patterns", api.ListPatterns)
@@ -148,6 +168,7 @@ func run() error {
 			r.Get("/instruments/{id}", api.GetInstrument)
 			r.Put("/instruments/{id}", api.UpdateInstrument)
 			r.Delete("/instruments/{id}", api.DeleteInstrument)
+			api.MountShareRoutes(r) // /songs/{id}/share, /shares/...
 		})
 	})
 
