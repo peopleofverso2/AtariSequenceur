@@ -3223,7 +3223,26 @@ async function loadSampleFromBlob(blob, defaultName){
     // un éventuel presetName hérité est désormais incorrect.
     delete state.voices[synthEd.trackId].presetName;
     renderSynthEditor(); refreshVoiceRow(synthEd.trackId);
-    $("#synthEdMsg").textContent="Sample chargé ("+monoBuf.duration.toFixed(2)+" s, "+(b64.length/1024|0)+" Ko base64)";
+
+    // Auto-sauve le sample fraîchement chargé en preset de
+    // bibliothèque pour qu'il soit réutilisable sur n'importe quelle
+    // piste / pattern. Best-effort : on n'échoue pas le chargement
+    // si la sauvegarde tombe (ex. localStorage saturé).
+    let savedNote="";
+    try{
+      const presetName="Sample · "+(defaultName||"sample");
+      await instSavePreset(presetName, state.voices[synthEd.trackId]);
+      // Indique aussi que la voix vient de ce preset (label dynamique).
+      state.voices[synthEd.trackId].presetName=presetName;
+      refreshVoiceRow(synthEd.trackId);
+      savedNote=" · ajouté à la bibliothèque";
+    }catch(err){
+      console.warn("auto-save sample failed",err);
+      savedNote=" · bibliothèque indisponible ("+err.message+")";
+    }
+    $("#synthEdMsg").textContent="Sample chargé ("+
+      monoBuf.duration.toFixed(2)+" s, "+(b64.length/1024|0)+" Ko"+
+      savedNote+")";
     $("#synthEdMsg").className="msg ok";
   }catch(err){
     console.warn(err);
@@ -3325,21 +3344,29 @@ $("#nameInput").addEventListener("keydown",e=>{
   else if(e.code==="Escape"){ e.preventDefault(); _nameClose(null); }
 });
 
+// Primitive : sauvegarde une voix dans la bibliothèque (cloud ou local).
+// Pas d'interaction UI ; renvoie l'entrée créée (avec son id).
+async function instSavePreset(name, voice){
+  const config=voiceSnapshot(voice);
+  if(cloudOn()){
+    return await api("/instruments",
+      {method:"POST",body:JSON.stringify({name, config})});
+  }
+  const list=instLocalRead();
+  const entry={id:"loc-"+Date.now(), name, config,
+               updatedAt:new Date().toISOString()};
+  list.unshift(entry);
+  instLocalWrite(list.slice(0,200));
+  return entry;
+}
+
 async function instSaveCurrent(){
   if(!synthEd.trackId) return;
   const name=await askName("Nom du preset",
     voiceShortName(state.voices[synthEd.trackId]),
     "Le preset sera ajouté à ta bibliothèque (cloud si connecté, local sinon).");
   if(!name) return;
-  const config=voiceSnapshot(state.voices[synthEd.trackId]);
-  if(cloudOn()){
-    await api("/instruments",{method:"POST",body:JSON.stringify({name, config})});
-  }else{
-    const list=instLocalRead();
-    list.unshift({id:"loc-"+Date.now(), name, config,
-                  updatedAt:new Date().toISOString()});
-    instLocalWrite(list.slice(0,200));
-  }
+  await instSavePreset(name, state.voices[synthEd.trackId]);
   $("#synthEdMsg").textContent="Preset enregistré : "+name;
   $("#synthEdMsg").className="msg ok";
 }
