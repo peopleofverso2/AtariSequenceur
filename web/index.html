@@ -258,13 +258,20 @@
     display:none;align-items:center;justify-content:center;padding:18px;z-index:50;
   }
   .overlay.show{display:flex}
+  /* La boîte de dialogue est plafonnée par la hauteur de la fenêtre :
+     la barre de titre reste figée en haut et `.dlg-body` scrolle. Sans
+     ça, les longs panneaux (éditeur synthé) débordent et le scroll du
+     contenu n'est pas possible. */
   .dialog{
     width:min(440px,100%);background:var(--face);
+    max-height:calc(100vh - 36px);
+    display:flex;flex-direction:column;
     border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
     box-shadow:0 0 0 1px var(--ink),8px 10px 0 rgba(0,0,0,.45);
   }
-  .dialog .titlebar{padding:3px}
-  .dlg-body{padding:14px;display:flex;flex-direction:column;gap:10px}
+  .dialog .titlebar{padding:3px;flex:none}
+  .dlg-body{padding:14px;display:flex;flex-direction:column;gap:10px;
+            overflow-y:auto;min-height:0;flex:1}
   .dlg-body p{font-size:11px;line-height:1.5}
   .dlg-row{display:flex;gap:8px;align-items:center}
   .dlg-row label{font-size:10px;font-weight:700;width:64px;text-transform:uppercase}
@@ -394,6 +401,10 @@
     background:var(--screen);padding:8px 10px;
     display:flex;flex-direction:column;gap:6px;
   }
+  /* L'attribut `hidden` est écrasé par les `display:` explicites de
+     certains conteneurs (ex. .editor-section en flex). On force le
+     display:none global pour que JS .hidden=true masque bien. */
+  [hidden]{display:none !important}
   .editor-section h4{
     font-size:10px;font-weight:700;color:var(--beam);text-transform:uppercase;
     letter-spacing:.06em;margin:0 0 2px 0;
