@@ -562,11 +562,18 @@
     .label .name{ font-size:9px }
     .label .note{ font-size:8px }
     .cell{ min-height:32px }
-    /* Footer : compact, bouton Login en bout */
+    /* Footer : compact, bouton Login en bout.
+       Le champ #pname (nom du pattern) prend sa propre ligne en
+       haut du footer pour être réellement lisible et éditable —
+       sinon il finit en "P." entre 7 boutons. flex: 1 0 100%
+       force le wrap avant les autres enfants. */
     .footer{ padding:5px; gap:5px;
              padding-bottom:calc(5px + env(safe-area-inset-bottom)); }
-    #pname{ flex:1; width:auto; min-width:0; font-size:11px }
-    .status{ font-size:9px; padding:3px 6px }
+    #pname{ order:-1; flex:1 0 100%; width:100%;
+            font-size:14px; padding:8px 10px; min-width:0; }
+    .status{ font-size:9px; padding:3px 6px;
+             max-width:100%; overflow:hidden;
+             text-overflow:ellipsis; white-space:nowrap; }
     /* Voix : rangée plus dense, on accepte un peu de scroll vertical */
     .voicerow{ flex-wrap:wrap; gap:4px; padding:5px 6px }
     .voicerow .gem-select{ font-size:11px; padding:3px 4px; max-width:80px }
