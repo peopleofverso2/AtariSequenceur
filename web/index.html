@@ -712,6 +712,7 @@
     <div class="sep"></div>
     <button class="btn" id="rand">Random</button>
     <button class="btn" id="clear">Clear</button>
+    <button class="btn" id="newPat">Nouveau</button>
   </div>
 
   <!-- écran / grille -->
@@ -1213,7 +1214,11 @@ const VEL_GHOST=50, VEL_NORMAL=100, VEL_ACCENT=127;
 
 const state = {bpm:120, swing:0, playing:false, name:"PATTERN 01",
                length:16, res:4, grid:{}, subdiv:{}, vel:{}, mutes:{},
-               solo:{}, mix:{}, voices:{}};
+               solo:{}, mix:{}, voices:{},
+               // id du pattern courant (null = inédit). Permet à Save
+               // de faire PUT (overwrite) plutôt qu'un POST systématique
+               // qui dupliquait l'entrée en banque à chaque clic.
+               patternId:null};
 TRACKS.forEach((t,i)=>{
   state.grid[t.id]=new Array(state.length).fill(0);
   state.subdiv[t.id]=new Array(state.length).fill(1);   // 1-4 retriggers per step
@@ -1767,7 +1772,9 @@ function normalizeVoice(v, idx){
   }
   if(v.type==="builtin"){
     const inst=INSTRUMENTS[v.inst]?v.inst:KIT[i%KIT.length];
-    return {type:"builtin", inst, pitch:clampPitch((v.pitch|0)||INST_DEFAULT_PITCH[inst]||60)};
+    const out={type:"builtin", inst, pitch:clampPitch((v.pitch|0)||INST_DEFAULT_PITCH[inst]||60)};
+    if(v.presetName) out.presetName=v.presetName;
+    return out;
   }
   if(v.type==="fm"){
     const d=defaultFMVoice(v.pitch);
@@ -1778,7 +1785,9 @@ function normalizeVoice(v, idx){
     fm.modulatorWave=FM_WAVES.includes(fm.modulatorWave)?fm.modulatorWave:"sine";
     fm.ratio=Math.max(FM_RATIO_MIN,Math.min(FM_RATIO_MAX,+fm.ratio||1));
     fm.index=Math.max(FM_INDEX_MIN,Math.min(FM_INDEX_MAX,+fm.index||0));
-    return {type:"fm", pitch:clampPitch(v.pitch|0||60), fm};
+    const out={type:"fm", pitch:clampPitch(v.pitch|0||60), fm};
+    if(v.presetName) out.presetName=v.presetName;
+    return out;
   }
   if(v.type==="sample"){
     const d=defaultSampleVoice(v.pitch);
@@ -1793,7 +1802,9 @@ function normalizeVoice(v, idx){
     sample.fm.engine = (sample.fm.engine==="worklet") ? "worklet" : "detune";
     sample.fm.ratio=Math.max(FM_RATIO_MIN,Math.min(FM_RATIO_MAX,+sample.fm.ratio||1));
     sample.fm.depth=Math.max(0,Math.min(2400,+sample.fm.depth||0));  // 0..2400
-    return {type:"sample", pitch:clampPitch(v.pitch|0||60), sample};
+    const out={type:"sample", pitch:clampPitch(v.pitch|0||60), sample};
+    if(v.presetName) out.presetName=v.presetName;
+    return out;
   }
   // type inconnu : fallback builtin.
   const inst=KIT[i%KIT.length];
@@ -2334,6 +2345,15 @@ $("#clear").onclick=()=>{
   TRACKS.forEach(t=>{ state.grid[t.id].fill(0); state.subdiv[t.id].fill(1); });
   refreshGrid();
 };
+// Nouveau pattern : pas de remontage de la grille, juste l'oubli de
+// l'id source — le prochain Save créera une entrée fraîche en banque
+// au lieu de remplacer celle qu'on était en train d'éditer.
+$("#newPat").onclick=()=>{
+  state.patternId=null;
+  state.name="PATTERN "+(localRead().length+1).toString().padStart(2,"0");
+  $("#pname").value=state.name;
+  flash($("#newPat"),"OK");
+};
 $("#rand").onclick=()=>{
   const SPREAD=[0,0,2,3,5,7,-5,12];     // intervalles agréables pour le mélodique
   TRACKS.forEach(t=>{
@@ -2505,6 +2525,11 @@ function snapshot(){
                  length:state.length, res:state.res}};
 }
 function applyPattern(p){
+  // Mémorise l'id de la source si la pattern vient d'une row persistée.
+  // Les presets factory (Beats), les snapshots du mode song et les
+  // patterns "fresh" n'ont pas d'id : on revient à null, ce qui fera
+  // un POST au prochain Save.
+  state.patternId = p && p.id ? String(p.id) : null;
   state.name=(p.name||"PATTERN").toUpperCase();
   setBpm(p.bpm||120);
   state.swing=Math.max(0,Math.min(75,p.swing||0));
@@ -2565,14 +2590,36 @@ function applyPattern(p){
 
 async function savePattern(){
   const snap=snapshot();
+  const id=state.patternId;
   if(cloudOn()){
-    await api("/patterns",{method:"POST",body:JSON.stringify(snap)});
-  }else{
-    const list=localRead();
-    list.unshift(Object.assign(
-      {id:"loc-"+Date.now(),updatedAt:new Date().toISOString()},snap));
-    localWrite(list.slice(0,100));
+    // PUT si on édite un pattern cloud connu (UUID), POST sinon.
+    if(id && !String(id).startsWith("loc-")){
+      const res=await api("/patterns/"+id,
+                          {method:"PUT",body:JSON.stringify(snap)});
+      state.patternId=res && res.id ? String(res.id) : id;
+    }else{
+      const res=await api("/patterns",
+                          {method:"POST",body:JSON.stringify(snap)});
+      state.patternId=res && res.id ? String(res.id) : null;
+    }
+    return;
   }
+  // Mode local : mise à jour en place quand un id loc- existe, sinon
+  // nouvelle entrée. Le tableau localStorage est trié récent-d'abord :
+  // on déplace l'entrée éditée en tête pour matcher.
+  const list=localRead();
+  const stamp=new Date().toISOString();
+  if(id && String(id).startsWith("loc-")){
+    const i=list.findIndex(p=>p.id===id);
+    const updated=Object.assign({id, updatedAt:stamp}, snap);
+    if(i>=0) list.splice(i,1);
+    list.unshift(updated);
+  }else{
+    const newId="loc-"+Date.now();
+    list.unshift(Object.assign({id:newId, updatedAt:stamp}, snap));
+    state.patternId=newId;
+  }
+  localWrite(list.slice(0,100));
 }
 async function fetchBank(){
   if(cloudOn()) return (await api("/patterns")).patterns||[];
