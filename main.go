@@ -143,6 +143,11 @@ func run() error {
 			r.Get("/songs/{id}", api.GetSong)
 			r.Put("/songs/{id}", api.UpdateSong)
 			r.Delete("/songs/{id}", api.DeleteSong)
+			r.Get("/instruments", api.ListInstruments)
+			r.Post("/instruments", api.CreateInstrument)
+			r.Get("/instruments/{id}", api.GetInstrument)
+			r.Put("/instruments/{id}", api.UpdateInstrument)
+			r.Delete("/instruments/{id}", api.DeleteInstrument)
 		})
 	})
 

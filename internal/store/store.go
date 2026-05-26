@@ -257,3 +257,93 @@ func (s *Store) DeleteSong(ctx context.Context, userID, id string) error {
 	}
 	return nil
 }
+
+// Instrument is a reusable voice preset. Config is the opaque JSON
+// blob produced by the frontend synth editor (type, FM params, sample
+// bytes base64, ADSR, etc.) — the backend never inspects its shape.
+type Instrument struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Config    json.RawMessage `json:"config"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+}
+
+const instrumentCols = `id, name, config, updated_at`
+
+func scanInstrument(row pgx.Row) (Instrument, error) {
+	var i Instrument
+	err := row.Scan(&i.ID, &i.Name, &i.Config, &i.UpdatedAt)
+	return i, err
+}
+
+// ListInstruments returns every instrument preset owned by the user, newest first.
+func (s *Store) ListInstruments(ctx context.Context, userID string) ([]Instrument, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+instrumentCols+`
+		   FROM instruments
+		  WHERE user_id = $1
+		  ORDER BY updated_at DESC
+		  LIMIT 500`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]Instrument, 0, 16)
+	for rows.Next() {
+		it, err := scanInstrument(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// GetInstrument returns a single instrument by id.
+func (s *Store) GetInstrument(ctx context.Context, userID, id string) (Instrument, error) {
+	it, err := scanInstrument(s.pool.QueryRow(ctx,
+		`SELECT `+instrumentCols+`
+		   FROM instruments
+		  WHERE user_id = $1 AND id = $2`, userID, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Instrument{}, ErrNotFound
+	}
+	return it, err
+}
+
+// CreateInstrument inserts a new instrument preset.
+func (s *Store) CreateInstrument(ctx context.Context, userID string, in Instrument) (Instrument, error) {
+	return scanInstrument(s.pool.QueryRow(ctx,
+		`INSERT INTO instruments (user_id, name, config)
+		      VALUES ($1, $2, $3)
+		   RETURNING `+instrumentCols,
+		userID, in.Name, in.Config))
+}
+
+// UpdateInstrument overwrites an existing preset owned by the user.
+func (s *Store) UpdateInstrument(ctx context.Context, userID, id string, in Instrument) (Instrument, error) {
+	res, err := scanInstrument(s.pool.QueryRow(ctx,
+		`UPDATE instruments
+		    SET name = $3, config = $4, updated_at = now()
+		  WHERE user_id = $1 AND id = $2
+		 RETURNING `+instrumentCols,
+		userID, id, in.Name, in.Config))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Instrument{}, ErrNotFound
+	}
+	return res, err
+}
+
+// DeleteInstrument removes a preset owned by the user.
+func (s *Store) DeleteInstrument(ctx context.Context, userID, id string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM instruments WHERE user_id = $1 AND id = $2`, userID, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

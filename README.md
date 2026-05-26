@@ -11,8 +11,12 @@ livré comme une vraie web app **Go + Cloud Run + Cloud SQL Postgres**.
 - sortie **MIDI** (Web MIDI : notes + horloge 24 ppqn) et **export `.mid`**
 - **entrée MIDI** : un clavier USB joue les voix, saisit la note dans le pad survolé, ou **enregistre en live** (quantisé sur le pas le plus proche pendant la lecture)
 - **mode song** : enchaîne plusieurs patterns sauvegardés, chacun joué *×N* fois, avec changement de tempo/longueur à chaque pattern
+- **synthé FM 2 opérateurs par piste** : carrier + modulateur, ratio 1/8 → 16, index 0 → 24, ADSR séparé pour l'amplitude et la modulation, 4 ondes (sine/square/saw/triangle)
+- **échantillonneur** : import de fichier audio OU enregistrement micro 3 s ; lecture transposée par pitch (`playbackRate`), ADSR sur l'amplitude
+- **FM appliquée au sample** : un oscillateur module le `detune` (en cents) pour faire vibrer / déformer dynamiquement la lecture du sample
+- **bibliothèque d'instruments** par utilisateur : sauvegarde / rappel de presets FM ou samples, synchronisée cloud quand on est connecté
 - comptes applicatifs : signup/login bcrypt + JWT maison (HS256), pas de dépendance d'auth tierce
-- sauvegarde des patterns **et des songs** : **cloud** (Cloud SQL) quand on est connecté,
+- sauvegarde des patterns, songs **et instruments** : **cloud** (Cloud SQL) quand on est connecté,
   **locale** (`localStorage`) sinon — l'app reste 100 % jouable hors-ligne
 
 ## Architecture
@@ -25,8 +29,9 @@ navigateur ──HTTP──► Cloud Run (binaire Go)
    │                      ├─ /config            feature flag "cloud"
    │                      ├─ /api/signup        bcrypt + token
    │                      ├─ /api/login         vérif + token
-   ▼                      ├─ /api/patterns      CRUD (JWT requis)
-   localStorage           └─ /api/songs         CRUD (JWT requis)
+                          ├─ /api/patterns      CRUD (JWT requis)
+   ▼                      ├─ /api/songs         CRUD (JWT requis)
+   localStorage           └─ /api/instruments   CRUD (JWT requis)
    (fallback                    │
     hors-ligne)                 ▼ pgx pool
                           Cloud SQL Postgres
@@ -53,10 +58,10 @@ Choix structurants :
 ├── main.go                  routeur Chi, pool pgx, arrêt gracieux
 ├── internal/
 │   ├── auth/                bcrypt + JWT HS256 (stdlib + x/crypto)
-│   ├── store/               accès Postgres (pgx) — users + patterns + songs
-│   └── handlers/            API JSON : signup, login, patterns, songs
-├── web/index.html           frontend séquenceur (embarqué)
-├── db/schema.sql            tables (users, patterns, songs) + triggers
+│   ├── store/               accès Postgres (pgx) — users + patterns + songs + instruments
+│   └── handlers/            API JSON : signup, login, patterns, songs, instruments
+├── web/index.html           frontend séquenceur (embarqué, ~80 ko de JS inline)
+├── db/schema.sql            tables (users, patterns, songs, instruments) + triggers
 ├── docker-compose.yml       Postgres pour le dev local
 └── Dockerfile               build multi-stage, image distroless
 ```
@@ -131,7 +136,9 @@ couleurs. Aucun logo ni marque Atari n'est utilisé — c'est un clin d'œil.
 
 ## Pistes d'extension
 
-- patterns partagés / publics (lecture seule via la clé anon + RLS)
+- patterns partagés / publics (lecture seule via un token public)
 - export WAV hors-ligne via `OfflineAudioContext`
 - accent / vélocité par pas
-- ~~enchaînement de patterns (mode *song*)~~ — fait, bouton **Song** dans le pied de page
+- vraie FM audio-rate sur les samples (via `AudioWorklet` — pour l'instant on modulé le `detune` en cents, ce qui donne un chorus/vibrato profond mais pas une vraie FM)
+- ~~enchaînement de patterns (mode *song*)~~ — fait, bouton **Song**
+- ~~synthé FM + samples + enregistrement micro~~ — fait, bouton **EDIT** par piste dans le panneau Voix

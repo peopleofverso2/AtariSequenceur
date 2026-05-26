@@ -14,9 +14,15 @@ import (
 	"github.com/peopleofverso/atari-step-sequencer/internal/store"
 )
 
-// maxBody caps request bodies: a 16-step, multi-track grid is a few
-// hundred bytes, so 64 KiB leaves generous headroom while bounding memory.
+// maxBody caps request bodies for small JSON payloads (credentials,
+// songs). A 64 KiB cap is plenty for any non-audio payload.
 const maxBody = 64 * 1024
+
+// maxAudioBody caps payloads that may carry base64-encoded sample
+// bytes: instrument presets, and patterns whose voices embed samples.
+// 8 MiB allows ~6 MB of sample data per voice/preset which is well
+// beyond what a step-sequencer one-shot needs.
+const maxAudioBody = 8 * 1024 * 1024
 
 // API holds the dependencies of the pattern handlers.
 type API struct {
@@ -284,7 +290,9 @@ func (a *API) handleErr(w http.ResponseWriter, err error, genericMsg string) boo
 
 func decode(w http.ResponseWriter, r *http.Request) (patternInput, bool) {
 	var in patternInput
-	dec := json.NewDecoder(io.LimitReader(r.Body, maxBody))
+	// Pattern voices may embed base64 sample bytes, so the cap is the
+	// generous audio body limit rather than the small JSON one.
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxAudioBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json body")
@@ -295,6 +303,113 @@ func decode(w http.ResponseWriter, r *http.Request) (patternInput, bool) {
 		return in, false
 	}
 	return in, true
+}
+
+// instrumentInput is the payload for instrument create/update.
+type instrumentInput struct {
+	Name   string          `json:"name"`
+	Config json.RawMessage `json:"config"`
+}
+
+func (in *instrumentInput) normalize() error {
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" || len([]rune(in.Name)) > 60 {
+		return errors.New("name must be 1-60 characters")
+	}
+	if len(in.Config) == 0 || !json.Valid(in.Config) {
+		return errors.New("config must be a valid json object")
+	}
+	return nil
+}
+
+func (in instrumentInput) toInstrument() store.Instrument {
+	return store.Instrument{Name: in.Name, Config: in.Config}
+}
+
+func decodeInstrument(w http.ResponseWriter, r *http.Request) (instrumentInput, bool) {
+	var in instrumentInput
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxAudioBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json body")
+		return in, false
+	}
+	if err := in.normalize(); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return in, false
+	}
+	return in, true
+}
+
+// ListInstruments returns every instrument preset owned by the caller.
+func (a *API) ListInstruments(w http.ResponseWriter, r *http.Request) {
+	if !a.ready(w) {
+		return
+	}
+	items, err := a.store.ListInstruments(r.Context(), auth.UserID(r.Context()))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load instruments")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"instruments": items})
+}
+
+// GetInstrument returns one preset.
+func (a *API) GetInstrument(w http.ResponseWriter, r *http.Request) {
+	if !a.ready(w) {
+		return
+	}
+	it, err := a.store.GetInstrument(r.Context(), auth.UserID(r.Context()), chi.URLParam(r, "id"))
+	if a.handleErr(w, err, "could not load instrument") {
+		return
+	}
+	writeJSON(w, http.StatusOK, it)
+}
+
+// CreateInstrument stores a new preset.
+func (a *API) CreateInstrument(w http.ResponseWriter, r *http.Request) {
+	if !a.ready(w) {
+		return
+	}
+	in, ok := decodeInstrument(w, r)
+	if !ok {
+		return
+	}
+	it, err := a.store.CreateInstrument(r.Context(), auth.UserID(r.Context()), in.toInstrument())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not save instrument")
+		return
+	}
+	writeJSON(w, http.StatusCreated, it)
+}
+
+// UpdateInstrument overwrites an existing preset.
+func (a *API) UpdateInstrument(w http.ResponseWriter, r *http.Request) {
+	if !a.ready(w) {
+		return
+	}
+	in, ok := decodeInstrument(w, r)
+	if !ok {
+		return
+	}
+	it, err := a.store.UpdateInstrument(r.Context(), auth.UserID(r.Context()),
+		chi.URLParam(r, "id"), in.toInstrument())
+	if a.handleErr(w, err, "could not update instrument") {
+		return
+	}
+	writeJSON(w, http.StatusOK, it)
+}
+
+// DeleteInstrument removes a preset.
+func (a *API) DeleteInstrument(w http.ResponseWriter, r *http.Request) {
+	if !a.ready(w) {
+		return
+	}
+	err := a.store.DeleteInstrument(r.Context(), auth.UserID(r.Context()), chi.URLParam(r, "id"))
+	if a.handleErr(w, err, "could not delete instrument") {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

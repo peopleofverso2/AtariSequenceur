@@ -351,6 +351,73 @@
   }
   .songbadge[hidden]{display:none}
 
+  /* éditeur synth — chip "type" dans la rangée de voix */
+  .voicerow .vtype{
+    font-size:9px;font-weight:700;color:var(--ink);
+    padding:2px 5px;background:var(--hi);
+    border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    flex:none;min-width:42px;text-align:center;letter-spacing:.04em;
+  }
+  .voicerow .vtype.fm{background:#d0e7ff}
+  .voicerow .vtype.sample{background:#ffd9d4}
+  /* boutons row "kbd-like" */
+  .kbtn{
+    font-family:var(--mono);font-size:10px;font-weight:700;
+    background:var(--face);color:var(--ink);
+    border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    padding:4px 8px;cursor:pointer;text-transform:uppercase;letter-spacing:.05em;
+  }
+  .kbtn:active,.kbtn[aria-pressed=true]{
+    border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    background:var(--face-dk);
+  }
+  /* sliders ADSR/FM stylés "GEM" */
+  .knobrow{
+    display:grid;grid-template-columns:80px 1fr 56px;gap:8px;
+    align-items:center;font-size:10px;font-weight:700;
+  }
+  .knobrow label{color:#d7d3ec;text-transform:uppercase;letter-spacing:.04em}
+  .knobrow .readout{
+    background:var(--screen);color:var(--beam);
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    padding:2px 4px;text-align:right;font-size:10px;font-family:var(--mono);
+  }
+  .knobrow input[type=range]{width:100%;accent-color:#1c1834}
+  .editor-section{
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    background:var(--screen);padding:8px 10px;
+    display:flex;flex-direction:column;gap:6px;
+  }
+  .editor-section h4{
+    font-size:10px;font-weight:700;color:var(--beam);text-transform:uppercase;
+    letter-spacing:.06em;margin:0 0 2px 0;
+  }
+  .seg{display:flex;gap:0}
+  .seg .kbtn{flex:1;border-radius:0}
+  .seg .kbtn + .kbtn{margin-left:-2px}
+  /* éditeur lui-même : dialogue plus large */
+  #synthEditorOverlay .dialog{width:min(560px,calc(100% - 32px))}
+  .meter{
+    height:18px;background:var(--screen);overflow:hidden;
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    position:relative;
+  }
+  .meter::before{
+    content:"";position:absolute;left:0;top:0;bottom:0;width:var(--w,0);
+    background:linear-gradient(90deg,#3ad07c 0%,#3ad07c 70%,#ffcf57 86%,#ff5e5e 100%);
+    transition:width .04s linear;
+  }
+  /* badge "REC" rouge clignotant pendant l'enregistrement micro */
+  .recflash{
+    display:inline-flex;align-items:center;gap:5px;
+    font-size:10px;font-weight:700;color:#ff5e5e;
+  }
+  .recflash::before{
+    content:"";width:9px;height:9px;border-radius:50%;background:#ff5e5e;
+    animation:rblink 1s infinite;
+  }
+  @keyframes rblink{0%,49%{opacity:1}50%,100%{opacity:.2}}
+
   /* infobulle de hauteur (pendant le réglage d'un pad) */
   #tip{
     position:fixed;z-index:60;pointer-events:none;display:none;
@@ -487,6 +554,192 @@
       <div class="msg" id="songBankMsg"></div>
       <div class="dlg-actions">
         <button class="btn" data-close="songBankOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : éditeur de synthé (par piste) -->
+<div class="overlay" id="synthEditorOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title">
+      <span>Synthé · piste <span id="synthEdTrack">?</span></span>
+    </div></div>
+    <div class="dlg-body" id="synthEdBody">
+      <div class="dlg-row">
+        <label>Type</label>
+        <div class="seg" id="synthEdType">
+          <button class="kbtn" data-type="builtin">Built-in</button>
+          <button class="kbtn" data-type="fm">FM</button>
+          <button class="kbtn" data-type="sample">Sample</button>
+        </div>
+        <button class="btn" id="synthEdAudition" title="auditionner">&#9654;</button>
+      </div>
+
+      <!-- panneau BUILTIN ------------------------------------- -->
+      <div id="synthEdBuiltin" class="editor-section" hidden>
+        <h4>Instrument chiptune</h4>
+        <div class="dlg-row">
+          <label for="synthEdInst">Voix</label>
+          <select class="gem-select" id="synthEdInst" style="flex:1"></select>
+        </div>
+      </div>
+
+      <!-- panneau FM ------------------------------------------ -->
+      <div id="synthEdFM" class="editor-section" hidden>
+        <h4>Opérateurs</h4>
+        <div class="knobrow"><label for="fmCarWave">Carrier</label>
+          <select class="gem-select" id="fmCarWave"></select>
+          <span></span>
+        </div>
+        <div class="knobrow"><label for="fmModWave">Modulator</label>
+          <select class="gem-select" id="fmModWave"></select>
+          <span></span>
+        </div>
+        <div class="knobrow"><label>Ratio</label>
+          <input type="range" id="fmRatio" min="0.125" max="16" step="0.125">
+          <span class="readout" id="fmRatioOut">2.00</span>
+        </div>
+        <div class="knobrow"><label>Index</label>
+          <input type="range" id="fmIndex" min="0" max="24" step="0.1">
+          <span class="readout" id="fmIndexOut">2.0</span>
+        </div>
+
+        <h4>Enveloppe amplitude</h4>
+        <div class="knobrow"><label>Attack</label>
+          <input type="range" id="fmAmpA" min="0" max="2" step="0.005">
+          <span class="readout" id="fmAmpAOut">0.005</span>
+        </div>
+        <div class="knobrow"><label>Decay</label>
+          <input type="range" id="fmAmpD" min="0" max="2" step="0.005">
+          <span class="readout" id="fmAmpDOut">0.120</span>
+        </div>
+        <div class="knobrow"><label>Sustain</label>
+          <input type="range" id="fmAmpS" min="0" max="1" step="0.01">
+          <span class="readout" id="fmAmpSOut">0.50</span>
+        </div>
+        <div class="knobrow"><label>Release</label>
+          <input type="range" id="fmAmpR" min="0" max="3" step="0.01">
+          <span class="readout" id="fmAmpROut">0.18</span>
+        </div>
+
+        <h4>Enveloppe modulation</h4>
+        <div class="knobrow"><label>Attack</label>
+          <input type="range" id="fmModA" min="0" max="2" step="0.005">
+          <span class="readout" id="fmModAOut">0.005</span>
+        </div>
+        <div class="knobrow"><label>Decay</label>
+          <input type="range" id="fmModD" min="0" max="2" step="0.005">
+          <span class="readout" id="fmModDOut">0.200</span>
+        </div>
+        <div class="knobrow"><label>Sustain</label>
+          <input type="range" id="fmModS" min="0" max="1" step="0.01">
+          <span class="readout" id="fmModSOut">0.00</span>
+        </div>
+        <div class="knobrow"><label>Release</label>
+          <input type="range" id="fmModR" min="0" max="3" step="0.01">
+          <span class="readout" id="fmModROut">0.10</span>
+        </div>
+      </div>
+
+      <!-- panneau SAMPLE ------------------------------------- -->
+      <div id="synthEdSample" class="editor-section" hidden>
+        <h4>Source</h4>
+        <div class="dlg-row" style="gap:6px">
+          <span class="readout" id="sampleInfo" style="flex:1;text-align:left;padding:4px 6px">— vide —</span>
+        </div>
+        <div class="dlg-row" style="gap:6px;flex-wrap:wrap">
+          <button class="btn" id="sampleUpload">Importer un fichier&hellip;</button>
+          <button class="btn" id="sampleRecord">Enregistrer micro 3 s</button>
+          <button class="btn" id="sampleClear">Effacer</button>
+          <span class="recflash" id="sampleRecFlash" hidden>Recording&hellip;</span>
+        </div>
+        <div class="meter"><div id="sampleMeterFill" style="display:none"></div></div>
+        <input type="file" id="sampleFile" accept="audio/*" hidden>
+
+        <div class="knobrow"><label>Base pitch</label>
+          <input type="range" id="sampleBase" min="24" max="84" step="1">
+          <span class="readout" id="sampleBaseOut">C4</span>
+        </div>
+
+        <h4>Enveloppe amplitude</h4>
+        <div class="knobrow"><label>Attack</label>
+          <input type="range" id="sampAmpA" min="0" max="2" step="0.005">
+          <span class="readout" id="sampAmpAOut">0.005</span>
+        </div>
+        <div class="knobrow"><label>Decay</label>
+          <input type="range" id="sampAmpD" min="0" max="2" step="0.005">
+          <span class="readout" id="sampAmpDOut">0.10</span>
+        </div>
+        <div class="knobrow"><label>Sustain</label>
+          <input type="range" id="sampAmpS" min="0" max="1" step="0.01">
+          <span class="readout" id="sampAmpSOut">1.00</span>
+        </div>
+        <div class="knobrow"><label>Release</label>
+          <input type="range" id="sampAmpR" min="0" max="3" step="0.01">
+          <span class="readout" id="sampAmpROut">0.05</span>
+        </div>
+
+        <h4>FM appliquée au sample (détune en cents)</h4>
+        <div class="knobrow">
+          <label>Activer</label>
+          <label class="chk" style="margin:0"><input type="checkbox" id="sfmOn"></label>
+          <span></span>
+        </div>
+        <div class="knobrow"><label>Mod wave</label>
+          <select class="gem-select" id="sfmModWave"></select>
+          <span></span>
+        </div>
+        <div class="knobrow"><label>Ratio</label>
+          <input type="range" id="sfmRatio" min="0.125" max="16" step="0.125">
+          <span class="readout" id="sfmRatioOut">1.00</span>
+        </div>
+        <div class="knobrow"><label>Depth (¢)</label>
+          <input type="range" id="sfmDepth" min="0" max="2400" step="10">
+          <span class="readout" id="sfmDepthOut">0</span>
+        </div>
+        <div class="knobrow"><label>Env A</label>
+          <input type="range" id="sfmEnvA" min="0" max="2" step="0.005">
+          <span class="readout" id="sfmEnvAOut">0.005</span>
+        </div>
+        <div class="knobrow"><label>Env D</label>
+          <input type="range" id="sfmEnvD" min="0" max="2" step="0.005">
+          <span class="readout" id="sfmEnvDOut">0.15</span>
+        </div>
+        <div class="knobrow"><label>Env S</label>
+          <input type="range" id="sfmEnvS" min="0" max="1" step="0.01">
+          <span class="readout" id="sfmEnvSOut">0.00</span>
+        </div>
+        <div class="knobrow"><label>Env R</label>
+          <input type="range" id="sfmEnvR" min="0" max="3" step="0.01">
+          <span class="readout" id="sfmEnvROut">0.05</span>
+        </div>
+      </div>
+
+      <div class="msg" id="synthEdMsg"></div>
+      <div class="dlg-actions">
+        <button class="btn" id="synthEdSavePreset">Sauver comme preset…</button>
+        <button class="btn" id="synthEdLib">Bibliothèque…</button>
+        <button class="btn" data-close="synthEditorOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : bibliothèque d'instruments -->
+<div class="overlay" id="instLibOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span id="instLibTitle">Bibliothèque d'instruments</span></div></div>
+    <div class="dlg-body">
+      <p style="font-size:11px;line-height:1.5">
+        Charge un preset sur la piste <b>active</b> (<span id="instLibTrack">?</span>).
+        Les presets sont synchronisés avec ton compte si tu es connecté,
+        sinon stockés localement à ce navigateur.
+      </p>
+      <div class="banklist" id="instLibList"></div>
+      <div class="msg" id="instLibMsg"></div>
+      <div class="dlg-actions">
+        <button class="btn" data-close="instLibOverlay">Fermer</button>
       </div>
     </div>
   </div>
@@ -746,9 +999,265 @@ const INSTRUMENTS = {
 };
 const INST_KEYS = Object.keys(INSTRUMENTS);
 
-function trigger(id,t,pitch){
-  INSTRUMENTS[state.voices[id].inst].play(t, noteFreq(pitch));
+/* =================================================================
+   2.bis FM SYNTH (2 opérateurs) + ÉCHANTILLONS (avec FM-of-sample)
+
+   Le voice config (state.voices[trackId]) porte un champ `type` :
+     - "builtin" (par défaut, rétro-compat) : passe par INSTRUMENTS[v.inst]
+     - "fm"     : 2 oscillateurs FM, ADSR amp + ADSR mod
+     - "sample" : AudioBufferSource avec pitch via playbackRate, ADSR
+                  amp, FM-of-sample optionnel via modulation de detune.
+
+   Chaque trigger() reçoit un instant t (horloge audio) et un pitch
+   MIDI ; il programme tous les nodes Web Audio en avance et appelle
+   stop() pour libérer les oscillateurs.
+   ================================================================= */
+
+// Caps utilisés à plusieurs endroits — partagés pour rester cohérent
+const FM_RATIO_MIN=0.125, FM_RATIO_MAX=16;
+const FM_INDEX_MIN=0, FM_INDEX_MAX=24;
+const ENV_MAX=4;  // chaque temps ADSR plafonné à 4 s
+const FM_WAVES = ["sine","square","sawtooth","triangle"];
+
+// Cache des AudioBuffer décodés. Clé = id de l'instrument ou des
+// 24 premiers caractères du base64 (suffisamment unique en pratique).
+const sampleCache = new Map();
+
+// Fabrique un voice config FM par défaut (timbre cloche/électrique doux).
+function defaultFMVoice(pitch){
+  return {
+    type:"fm",
+    pitch:pitch|0||60,
+    fm:{
+      carrierWave:"sine", modulatorWave:"sine",
+      ratio:2, index:2,
+      amp:{a:0.005, d:0.12, s:0.5, r:0.18},
+      mod:{a:0.005, d:0.20, s:0.0, r:0.10},
+    },
+  };
 }
+function defaultSampleVoice(pitch){
+  return {
+    type:"sample",
+    pitch:pitch|0||60,
+    sample:{
+      name:"(vide)", basePitch:60, data:"",
+      amp:{a:0.005, d:0.10, s:1, r:0.05},
+      fm:{enabled:false, modulatorWave:"sine", ratio:1, depth:0,
+          env:{a:0.005, d:0.15, s:0, r:0.05}},
+    },
+  };
+}
+
+// base64 (DOMString) <-> ArrayBuffer
+function b64ToAB(b64){
+  const bin=atob(b64);
+  const ab=new ArrayBuffer(bin.length);
+  const u=new Uint8Array(ab);
+  for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+  return ab;
+}
+function abToB64(ab){
+  const u=new Uint8Array(ab);
+  let bin=""; const CHUNK=8192;
+  for(let i=0;i<u.length;i+=CHUNK){
+    bin+=String.fromCharCode.apply(null,u.subarray(i,i+CHUNK));
+  }
+  return btoa(bin);
+}
+
+// AudioBuffer -> WAV 16-bit PCM (interleaved). Sortie en ArrayBuffer.
+function audioBufferToWav(buf){
+  const numCh=buf.numberOfChannels, sr=buf.sampleRate, n=buf.length;
+  const dataLen=n*numCh*2, total=44+dataLen;
+  const ab=new ArrayBuffer(total), v=new DataView(ab);
+  let p=0;
+  const ws=s=>{for(let i=0;i<s.length;i++) v.setUint8(p++,s.charCodeAt(i));};
+  const w32=n=>{v.setUint32(p,n,true);p+=4;};
+  const w16=n=>{v.setUint16(p,n,true);p+=2;};
+  ws("RIFF"); w32(total-8); ws("WAVE");
+  ws("fmt "); w32(16); w16(1); w16(numCh); w32(sr);
+  w32(sr*numCh*2); w16(numCh*2); w16(16);
+  ws("data"); w32(dataLen);
+  for(let i=0;i<n;i++){
+    for(let c=0;c<numCh;c++){
+      let s=buf.getChannelData(c)[i];
+      s=Math.max(-1,Math.min(1,s));
+      v.setInt16(p, s<0?s*0x8000:s*0x7FFF, true);
+      p+=2;
+    }
+  }
+  return ab;
+}
+
+// Décode un sample (base64 WAV) en AudioBuffer et le met en cache.
+// Renvoie une promesse ; la résolution stocke le buffer dans sample._buf
+// pour que trigger() le retrouve en synchrone.
+async function decodeSampleData(b64){
+  if(!ac) return null;
+  if(!b64) return null;
+  const key=b64.length<32?b64:b64.substring(0,32)+":"+b64.length;
+  let buf=sampleCache.get(key);
+  if(!buf){
+    try{
+      buf=await ac.decodeAudioData(b64ToAB(b64));
+      sampleCache.set(key,buf);
+    }catch(e){ console.warn("sample decode failed",e); return null; }
+  }
+  return buf;
+}
+
+// Décode (si besoin) le sample d'une voice et stocke le buffer dans
+// voice.sample._buf de manière non-énumérable pour qu'il ne sérialise pas.
+function ensureSampleBuf(voice){
+  if(!voice || voice.type!=="sample" || !voice.sample) return;
+  if(voice.sample._buf || !voice.sample.data) return;
+  decodeSampleData(voice.sample.data).then(buf=>{
+    if(!buf) return;
+    try{
+      Object.defineProperty(voice.sample,"_buf",
+        {value:buf,enumerable:false,writable:true,configurable:true});
+    }catch(_){ voice.sample._buf=buf; }
+  });
+}
+
+// ADSR avec sustain tenu jusqu'à `holdEnd`, puis release exponentielle.
+// peak peut être négatif ou >1 selon le paramètre piloté (ex. mod en Hz).
+function adsrTo(param, env, peak, t, holdEnd){
+  const a=Math.max(0.001,env.a||0), d=Math.max(0.001,env.d||0),
+        s=Math.max(0,Math.min(1,env.s||0)), r=Math.max(0.005,env.r||0);
+  const tA=t+a, tD=tA+d, tH=Math.max(tD,holdEnd), tR=tH+r;
+  param.setValueAtTime(0.0001, t);
+  param.linearRampToValueAtTime(peak, tA);
+  param.linearRampToValueAtTime(peak*s, tD);
+  if(tH>tD) param.setValueAtTime(peak*s, tH);
+  // exponentialRampToValueAtTime n'accepte pas 0 — on cible 0.0001.
+  param.exponentialRampToValueAtTime(Math.max(1e-5,Math.abs(peak)*1e-4) * Math.sign(peak||1), tR);
+  return tR;
+}
+
+function triggerFM(t, pitch, fm, dur){
+  const freq=noteFreq(pitch), modFreq=freq*(fm.ratio||1);
+  const car=ac.createOscillator(); car.type=fm.carrierWave||"sine";
+  car.frequency.value=freq;
+  const mod=ac.createOscillator(); mod.type=fm.modulatorWave||"sine";
+  mod.frequency.value=modFreq;
+  const modAmt=ac.createGain(); modAmt.gain.value=0;
+  mod.connect(modAmt).connect(car.frequency);
+  const amp=ac.createGain(); amp.gain.value=0.0001;
+  car.connect(amp).connect(master);
+
+  const holdEnd=t+Math.max(0.05,dur);
+  const tAmpEnd=adsrTo(amp.gain, fm.amp, 0.5, t, holdEnd);
+  // Convention FM classique : modulation depth en Hz = index * modFreq.
+  const tModEnd=adsrTo(modAmt.gain, fm.mod, (fm.index||0)*modFreq, t, holdEnd);
+
+  const stop=Math.max(tAmpEnd,tModEnd)+0.05;
+  car.start(t); mod.start(t);
+  car.stop(stop); mod.stop(stop);
+}
+
+function triggerSample(t, pitch, sample, dur){
+  const buf=sample._buf;
+  if(!buf){
+    // décodage encore en cours : on tente de l'amorcer pour la prochaine fois.
+    if(sample.data) decodeSampleData(sample.data).then(b=>{
+      if(b) try{Object.defineProperty(sample,"_buf",{value:b,enumerable:false,writable:true});}catch(_){}
+    });
+    return;
+  }
+  const src=ac.createBufferSource(); src.buffer=buf;
+  src.playbackRate.value=noteFreq(pitch)/noteFreq(sample.basePitch||60);
+
+  const amp=ac.createGain(); amp.gain.value=0.0001;
+  src.connect(amp).connect(master);
+  const holdEnd=t+Math.max(0.05,dur);
+  const tAmpEnd=adsrTo(amp.gain, sample.amp, 0.9, t, holdEnd);
+
+  // FM-of-sample : un oscillateur module le detune (en cents) — pas de
+  // vraie FM audio-rate sans AudioWorklet, mais ça donne un effet
+  // chorus/vibrato profond très utilisable.
+  if(sample.fm && sample.fm.enabled){
+    const sfm=sample.fm;
+    const mod=ac.createOscillator(); mod.type=sfm.modulatorWave||"sine";
+    mod.frequency.value=noteFreq(pitch)*(sfm.ratio||1);
+    const modGain=ac.createGain(); modGain.gain.value=0;
+    mod.connect(modGain).connect(src.detune);
+    const tModEnd=adsrTo(modGain.gain, sfm.env, sfm.depth||0, t, holdEnd);
+    mod.start(t); mod.stop(Math.max(tAmpEnd,tModEnd)+0.05);
+  }
+
+  src.start(t);
+  // Le sample s'arrête naturellement quand il a fini ; on stop() seulement
+  // pour libérer les nodes (sinon Web Audio les garde jusqu'au dur+queue).
+  const naturalEnd=t + (buf.duration/Math.max(0.0001,src.playbackRate.value));
+  src.stop(Math.min(naturalEnd, tAmpEnd)+0.05);
+}
+
+function trigger(id,t,pitch){
+  const v=state.voices[id];
+  if(!v) return;
+  // Rétro-compat : voix sans `type` -> chiptune builtin.
+  if(!v.type || v.type==="builtin"){
+    const inst=INSTRUMENTS[v.inst];
+    if(inst) inst.play(t, noteFreq(pitch));
+    return;
+  }
+  if(v.type==="fm" && v.fm){
+    triggerFM(t, pitch, v.fm, stepDur());
+  }else if(v.type==="sample" && v.sample){
+    triggerSample(t, pitch, v.sample, stepDur());
+  }
+}
+
+// Force toute structure de voice (legacy ou nouvelle) à une forme stable.
+// idx sert à choisir un instrument builtin par défaut si rien n'est fourni.
+function normalizeVoice(v, idx){
+  const i=Math.max(0,idx|0);
+  if(!v){
+    const inst=KIT[i%KIT.length];
+    return {type:"builtin", inst, pitch:INST_DEFAULT_PITCH[inst]||60};
+  }
+  // Format hérité : { inst, pitch } sans type.
+  if(!v.type && v.inst){
+    const inst=INSTRUMENTS[v.inst]?v.inst:KIT[i%KIT.length];
+    const pitch=clampPitch((v.pitch|0)||INST_DEFAULT_PITCH[inst]||60);
+    return {type:"builtin", inst, pitch};
+  }
+  if(v.type==="builtin"){
+    const inst=INSTRUMENTS[v.inst]?v.inst:KIT[i%KIT.length];
+    return {type:"builtin", inst, pitch:clampPitch((v.pitch|0)||INST_DEFAULT_PITCH[inst]||60)};
+  }
+  if(v.type==="fm"){
+    const d=defaultFMVoice(v.pitch);
+    const fm=Object.assign({}, d.fm, v.fm||{});
+    fm.amp=Object.assign({},d.fm.amp,(v.fm&&v.fm.amp)||{});
+    fm.mod=Object.assign({},d.fm.mod,(v.fm&&v.fm.mod)||{});
+    fm.carrierWave=FM_WAVES.includes(fm.carrierWave)?fm.carrierWave:"sine";
+    fm.modulatorWave=FM_WAVES.includes(fm.modulatorWave)?fm.modulatorWave:"sine";
+    fm.ratio=Math.max(FM_RATIO_MIN,Math.min(FM_RATIO_MAX,+fm.ratio||1));
+    fm.index=Math.max(FM_INDEX_MIN,Math.min(FM_INDEX_MAX,+fm.index||0));
+    return {type:"fm", pitch:clampPitch(v.pitch|0||60), fm};
+  }
+  if(v.type==="sample"){
+    const d=defaultSampleVoice(v.pitch);
+    const sample=Object.assign({},d.sample,v.sample||{});
+    sample.amp=Object.assign({},d.sample.amp,(v.sample&&v.sample.amp)||{});
+    sample.fm=Object.assign({},d.sample.fm,(v.sample&&v.sample.fm)||{});
+    sample.fm.env=Object.assign({},d.sample.fm.env,
+      (v.sample&&v.sample.fm&&v.sample.fm.env)||{});
+    sample.basePitch=clampPitch(sample.basePitch|0||60);
+    sample.fm.modulatorWave=FM_WAVES.includes(sample.fm.modulatorWave)
+                            ?sample.fm.modulatorWave:"sine";
+    sample.fm.ratio=Math.max(FM_RATIO_MIN,Math.min(FM_RATIO_MAX,+sample.fm.ratio||1));
+    sample.fm.depth=Math.max(0,Math.min(2400,+sample.fm.depth||0));  // en cents
+    return {type:"sample", pitch:clampPitch(v.pitch|0||60), sample};
+  }
+  // type inconnu : fallback builtin.
+  const inst=KIT[i%KIT.length];
+  return {type:"builtin", inst, pitch:INST_DEFAULT_PITCH[inst]||60};
+}
+function clampPitch(p){ return Math.max(PITCH_MIN,Math.min(PITCH_MAX,p|0||60)); }
 
 /* =================================================================
    3. MIDI — sortie Web MIDI, horloge 24 ppqn, export .mid
@@ -1428,14 +1937,8 @@ function applyPattern(p){
   TRACKS.forEach((t,i)=>{
     // voix d'abord : sert de hauteur par défaut aux anciens patterns 0/1
     const v=voices && (voices[t.id]||voices[LEGACY_ID[t.id]]);
-    if(v && INSTRUMENTS[v.inst]){
-      const pitch=Math.max(PITCH_MIN,Math.min(PITCH_MAX,
-                    (v.pitch|0)||INST_DEFAULT_PITCH[v.inst]||60));
-      state.voices[t.id]={inst:v.inst,pitch};
-    }else{
-      const inst=KIT[i%KIT.length];
-      state.voices[t.id]={inst, pitch:INST_DEFAULT_PITCH[inst]};
-    }
+    state.voices[t.id]=normalizeVoice(v, i);
+    ensureSampleBuf(state.voices[t.id]);
     // grille : 0 = éteint ; valeur >=24 = note ; valeur 1 (ancien format) = défaut
     const def=state.voices[t.id].pitch;
     const src=grid[t.id]||grid[LEGACY_ID[t.id]]||[];
@@ -1573,6 +2076,20 @@ $("#doSignup").onclick=async()=>{
 };
 
 /* ---- Voix : instrument + hauteur par piste ---- */
+// Étiquettes courtes utilisées dans la liste des voix et après édition.
+function voiceTypeLabel(v){
+  if(!v || !v.type || v.type==="builtin") return "BUILT";
+  if(v.type==="fm") return "FM";
+  if(v.type==="sample") return "SAMP";
+  return "?";
+}
+function voiceShortName(v){
+  if(!v) return "—";
+  if(!v.type || v.type==="builtin") return (INSTRUMENTS[v.inst]&&INSTRUMENTS[v.inst].name)||"?";
+  if(v.type==="fm") return "FM "+v.fm.ratio.toFixed(2)+":1 i"+v.fm.index.toFixed(1);
+  if(v.type==="sample") return v.sample.name||"(vide)";
+  return "?";
+}
 function buildVoiceRows(){
   const list=$("#voicelist"); list.innerHTML="";
   TRACKS.forEach((t,idx)=>{
@@ -1584,18 +2101,18 @@ function buildVoiceRows(){
     const num=document.createElement("span"); num.className="vnum";
     num.textContent=idx+1;
 
-    const inst=document.createElement("select"); inst.className="gem-select";
-    INST_KEYS.forEach(k=>{
-      const o=document.createElement("option");
-      o.value=k; o.textContent=INSTRUMENTS[k].name;
-      if(k===v.inst) o.selected=true;
-      inst.appendChild(o);
-    });
-    inst.onchange=()=>{ state.voices[t.id].inst=inst.value;
-                        refreshLabel(t.id);
-                        auditionNote(t.id,state.voices[t.id].pitch); };
+    const tlabel=(v && v.type)?v.type:"builtin";
+    const typeChip=document.createElement("span");
+    typeChip.className="vtype "+tlabel;
+    typeChip.textContent=voiceTypeLabel(v);
+
+    const name=document.createElement("span");
+    name.style.cssText="flex:1;color:#d7d3ec;font-size:11px;font-weight:700;"+
+      "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    name.textContent=voiceShortName(v);
 
     const note=document.createElement("select"); note.className="gem-select";
+    note.style.maxWidth="78px"; note.style.flex="0 0 auto";
     for(let m=PITCH_MAX;m>=PITCH_MIN;m--){
       const o=document.createElement("option");
       o.value=m; o.textContent=noteName(m);
@@ -1611,7 +2128,12 @@ function buildVoiceRows(){
     prev.title="écouter";
     prev.onclick=()=>auditionNote(t.id,state.voices[t.id].pitch);
 
-    row.append(num,chip,inst,note,prev);
+    const editBtn=document.createElement("button");
+    editBtn.className="btn"; editBtn.textContent="EDIT";
+    editBtn.title="éditeur synthé";
+    editBtn.onclick=()=>openSynthEditor(t.id);
+
+    row.append(num,chip,typeChip,name,note,editBtn,prev);
     list.appendChild(row);
   });
 }
@@ -1948,6 +2470,364 @@ $("#songNew").onclick=()=>{
   songRenderItems();
   $("#songMsg").textContent="";
 };
+
+/* =================================================================
+   10.ter ÉDITEUR DE SYNTHÉ  (FM + sample) — par piste
+
+   L'overlay #synthEditorOverlay vit toujours sur une piste précise :
+   on retient son id dans synthEd.trackId, et chaque déplacement de
+   slider mute en place dans state.voices[trackId]. Auditionner ne fait
+   qu'appeler trigger() (qui passe par la dispatch FM/sample).
+   ================================================================= */
+const synthEd = { trackId:null };
+
+function fmtFloat(v, p){ return Number(v).toFixed(p||2); }
+function fmtNote(m){ return noteName(m); }
+
+// Wave-select helpers
+function fillWaveSelect(sel, current){
+  sel.innerHTML="";
+  FM_WAVES.forEach(w=>{
+    const o=document.createElement("option");
+    o.value=w; o.textContent=w;
+    if(w===current) o.selected=true;
+    sel.appendChild(o);
+  });
+}
+
+function openSynthEditor(trackId){
+  synthEd.trackId=trackId;
+  const trackNum=TRACKS.findIndex(t=>t.id===trackId)+1;
+  $("#synthEdTrack").textContent=trackNum;
+  $("#synthEdMsg").textContent="";
+  renderSynthEditor();
+  show("synthEditorOverlay");
+}
+
+function renderSynthEditor(){
+  const tid=synthEd.trackId; if(!tid) return;
+  const v=state.voices[tid];
+  // boutons de type
+  document.querySelectorAll("#synthEdType .kbtn").forEach(b=>{
+    b.setAttribute("aria-pressed", b.dataset.type===(v.type||"builtin"));
+  });
+  $("#synthEdBuiltin").hidden = (v.type||"builtin")!=="builtin";
+  $("#synthEdFM").hidden      = v.type!=="fm";
+  $("#synthEdSample").hidden  = v.type!=="sample";
+
+  if((v.type||"builtin")==="builtin"){
+    const sel=$("#synthEdInst"); sel.innerHTML="";
+    INST_KEYS.forEach(k=>{
+      const o=document.createElement("option");
+      o.value=k; o.textContent=INSTRUMENTS[k].name;
+      if(k===v.inst) o.selected=true;
+      sel.appendChild(o);
+    });
+  }
+  if(v.type==="fm"){
+    fillWaveSelect($("#fmCarWave"), v.fm.carrierWave);
+    fillWaveSelect($("#fmModWave"), v.fm.modulatorWave);
+    $("#fmRatio").value=v.fm.ratio; $("#fmRatioOut").textContent=fmtFloat(v.fm.ratio);
+    $("#fmIndex").value=v.fm.index; $("#fmIndexOut").textContent=fmtFloat(v.fm.index,1);
+    const e=(id,val,p)=>{ $(id).value=val; $(id+"Out").textContent=fmtFloat(val,p); };
+    e("#fmAmpA",v.fm.amp.a,3); e("#fmAmpD",v.fm.amp.d,3);
+    e("#fmAmpS",v.fm.amp.s,2); e("#fmAmpR",v.fm.amp.r,2);
+    e("#fmModA",v.fm.mod.a,3); e("#fmModD",v.fm.mod.d,3);
+    e("#fmModS",v.fm.mod.s,2); e("#fmModR",v.fm.mod.r,2);
+  }
+  if(v.type==="sample"){
+    $("#sampleInfo").textContent =
+      v.sample.data ? (v.sample.name||"(sans nom)")
+                    : "— vide — importe un fichier ou enregistre depuis le micro";
+    $("#sampleBase").value=v.sample.basePitch||60;
+    $("#sampleBaseOut").textContent=fmtNote(v.sample.basePitch||60);
+    const e=(id,val,p)=>{ $(id).value=val; $(id+"Out").textContent=fmtFloat(val,p); };
+    e("#sampAmpA",v.sample.amp.a,3); e("#sampAmpD",v.sample.amp.d,3);
+    e("#sampAmpS",v.sample.amp.s,2); e("#sampAmpR",v.sample.amp.r,2);
+    fillWaveSelect($("#sfmModWave"), v.sample.fm.modulatorWave);
+    $("#sfmOn").checked=!!v.sample.fm.enabled;
+    e("#sfmRatio",v.sample.fm.ratio,2);
+    $("#sfmDepth").value=v.sample.fm.depth;
+    $("#sfmDepthOut").textContent=v.sample.fm.depth|0;
+    e("#sfmEnvA",v.sample.fm.env.a,3); e("#sfmEnvD",v.sample.fm.env.d,3);
+    e("#sfmEnvS",v.sample.fm.env.s,2); e("#sfmEnvR",v.sample.fm.env.r,2);
+  }
+}
+
+// Met à jour l'aperçu (chip + nom) après une modif.
+function refreshVoiceRow(trackId){
+  if($("#voiceOverlay").classList.contains("show")) buildVoiceRows();
+  refreshLabel(trackId);
+}
+
+// Change le type de voix : initialise la structure par défaut si absente.
+function setSynthType(trackId, type){
+  const cur=state.voices[trackId];
+  if(type===(cur.type||"builtin")) return;
+  if(type==="builtin"){
+    const idx=TRACKS.findIndex(t=>t.id===trackId);
+    const inst=cur.inst||KIT[idx%KIT.length];
+    state.voices[trackId]={type:"builtin", inst, pitch:cur.pitch||INST_DEFAULT_PITCH[inst]||60};
+  }else if(type==="fm"){
+    state.voices[trackId]=normalizeVoice(
+      Object.assign({}, defaultFMVoice(cur.pitch)), 0);
+  }else if(type==="sample"){
+    state.voices[trackId]=normalizeVoice(
+      Object.assign({}, defaultSampleVoice(cur.pitch)), 0);
+    ensureSampleBuf(state.voices[trackId]);
+  }
+  renderSynthEditor();
+  refreshVoiceRow(trackId);
+}
+
+// Boutons de type (3-state)
+document.querySelectorAll("#synthEdType .kbtn").forEach(b=>{
+  b.onclick=()=>setSynthType(synthEd.trackId, b.dataset.type);
+});
+
+// Builtin : changement d'instrument
+$("#synthEdInst").onchange=e=>{
+  state.voices[synthEd.trackId].inst=e.target.value;
+  refreshVoiceRow(synthEd.trackId);
+  auditionNote(synthEd.trackId, state.voices[synthEd.trackId].pitch);
+};
+
+// FM bindings — chaque slider met à jour la voix + l'affichage du readout
+function bindFloat(sliderId, getRef, setRef, decimals){
+  const sl=$(sliderId), out=$(sliderId+"Out");
+  sl.addEventListener("input",()=>{
+    const v=+sl.value;
+    setRef(v);
+    out.textContent=fmtFloat(v,decimals);
+    if(synthEd.trackId) refreshVoiceRow(synthEd.trackId);
+  });
+}
+function vFM(){ return state.voices[synthEd.trackId].fm; }
+function vSamp(){ return state.voices[synthEd.trackId].sample; }
+$("#fmCarWave").onchange=e=>{ vFM().carrierWave=e.target.value; };
+$("#fmModWave").onchange=e=>{ vFM().modulatorWave=e.target.value; };
+bindFloat("#fmRatio", null, v=>{ vFM().ratio=v; }, 2);
+bindFloat("#fmIndex", null, v=>{ vFM().index=v; }, 1);
+bindFloat("#fmAmpA", null, v=>{ vFM().amp.a=v; }, 3);
+bindFloat("#fmAmpD", null, v=>{ vFM().amp.d=v; }, 3);
+bindFloat("#fmAmpS", null, v=>{ vFM().amp.s=v; }, 2);
+bindFloat("#fmAmpR", null, v=>{ vFM().amp.r=v; }, 2);
+bindFloat("#fmModA", null, v=>{ vFM().mod.a=v; }, 3);
+bindFloat("#fmModD", null, v=>{ vFM().mod.d=v; }, 3);
+bindFloat("#fmModS", null, v=>{ vFM().mod.s=v; }, 2);
+bindFloat("#fmModR", null, v=>{ vFM().mod.r=v; }, 2);
+
+// Sample bindings
+$("#sampleBase").addEventListener("input",()=>{
+  const v=+$("#sampleBase").value;
+  vSamp().basePitch=v; $("#sampleBaseOut").textContent=fmtNote(v);
+});
+bindFloat("#sampAmpA", null, v=>{ vSamp().amp.a=v; }, 3);
+bindFloat("#sampAmpD", null, v=>{ vSamp().amp.d=v; }, 3);
+bindFloat("#sampAmpS", null, v=>{ vSamp().amp.s=v; }, 2);
+bindFloat("#sampAmpR", null, v=>{ vSamp().amp.r=v; }, 2);
+$("#sfmOn").onchange=e=>{ vSamp().fm.enabled=e.target.checked; };
+$("#sfmModWave").onchange=e=>{ vSamp().fm.modulatorWave=e.target.value; };
+bindFloat("#sfmRatio", null, v=>{ vSamp().fm.ratio=v; }, 2);
+$("#sfmDepth").addEventListener("input",()=>{
+  const v=+$("#sfmDepth").value; vSamp().fm.depth=v; $("#sfmDepthOut").textContent=v|0;
+});
+bindFloat("#sfmEnvA", null, v=>{ vSamp().fm.env.a=v; }, 3);
+bindFloat("#sfmEnvD", null, v=>{ vSamp().fm.env.d=v; }, 3);
+bindFloat("#sfmEnvS", null, v=>{ vSamp().fm.env.s=v; }, 2);
+bindFloat("#sfmEnvR", null, v=>{ vSamp().fm.env.r=v; }, 2);
+
+// Audition depuis l'éditeur (pré-écoute rapide à la hauteur de la voix)
+$("#synthEdAudition").onclick=()=>{
+  if(!synthEd.trackId) return;
+  auditionNote(synthEd.trackId, state.voices[synthEd.trackId].pitch);
+};
+
+/* ---- Sample upload + mic recording ---------------------------- */
+$("#sampleUpload").onclick=()=>$("#sampleFile").click();
+$("#sampleFile").onchange=async e=>{
+  const f=e.target.files && e.target.files[0]; if(!f) return;
+  $("#sampleFile").value="";
+  await loadSampleFromBlob(f, f.name.replace(/\.[^.]+$/,""));
+};
+$("#sampleClear").onclick=()=>{
+  const s=vSamp(); s.name="(vide)"; s.data="";
+  delete s._buf;
+  renderSynthEditor(); refreshVoiceRow(synthEd.trackId);
+};
+
+async function loadSampleFromBlob(blob, defaultName){
+  ensureAudio();
+  try{
+    const ab=await blob.arrayBuffer();
+    const buf=await ac.decodeAudioData(ab.slice(0));   // slice : decodeAudioData transfère
+    // Mono-down + cap durée à 5s (audio rate inchangé)
+    const monoBuf=toMonoCapped(buf, 5);
+    const wavAB=audioBufferToWav(monoBuf);
+    const b64=abToB64(wavAB);
+    const s=vSamp();
+    s.name=defaultName||"sample";
+    s.data=b64;
+    // injecte directement le buffer décodé (gain : pas de re-décodage)
+    try{ Object.defineProperty(s,"_buf",
+      {value:monoBuf, enumerable:false, writable:true, configurable:true}); }
+    catch(_){ s._buf=monoBuf; }
+    renderSynthEditor(); refreshVoiceRow(synthEd.trackId);
+    $("#synthEdMsg").textContent="Sample chargé ("+monoBuf.duration.toFixed(2)+" s, "+(b64.length/1024|0)+" Ko base64)";
+    $("#synthEdMsg").className="msg ok";
+  }catch(err){
+    console.warn(err);
+    $("#synthEdMsg").textContent="Décodage impossible : "+err.message;
+    $("#synthEdMsg").className="msg err";
+  }
+}
+
+function toMonoCapped(buf, maxSec){
+  const sr=buf.sampleRate;
+  const targetLen=Math.min(buf.length, Math.floor(sr*maxSec));
+  const out=ac.createBuffer(1, targetLen, sr);
+  const d=out.getChannelData(0);
+  if(buf.numberOfChannels===1){
+    d.set(buf.getChannelData(0).subarray(0,targetLen));
+  }else{
+    const l=buf.getChannelData(0), r=buf.getChannelData(1);
+    for(let i=0;i<targetLen;i++) d[i]=(l[i]+r[i])*0.5;
+  }
+  return out;
+}
+
+let _recState = null;  // {recorder, chunks, timer, mediaStream}
+$("#sampleRecord").onclick=async()=>{
+  ensureAudio();
+  if(_recState){ stopRecording(); return; }
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const rec=new MediaRecorder(stream);
+    const chunks=[];
+    rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop=async()=>{
+      stream.getTracks().forEach(t=>t.stop());
+      $("#sampleRecFlash").hidden=true;
+      $("#sampleRecord").textContent="Enregistrer micro 3 s";
+      _recState=null;
+      if(!chunks.length) return;
+      const blob=new Blob(chunks,{type:rec.mimeType||"audio/webm"});
+      await loadSampleFromBlob(blob, "mic "+new Date().toISOString().substring(11,19));
+    };
+    rec.start();
+    $("#sampleRecFlash").hidden=false;
+    $("#sampleRecord").textContent="Stop";
+    _recState={recorder:rec,chunks,mediaStream:stream,
+      timer:setTimeout(()=>{ try{rec.stop();}catch(_){}}, 3000)};
+  }catch(err){
+    $("#synthEdMsg").textContent="Micro indisponible : "+err.message;
+    $("#synthEdMsg").className="msg err";
+  }
+};
+function stopRecording(){
+  if(!_recState) return;
+  clearTimeout(_recState.timer);
+  try{ _recState.recorder.stop(); }catch(_){}
+}
+
+/* ---- Bibliothèque d'instruments ------------------------------- */
+const INST_LKEY="atari-seq:instruments.v1";
+function instLocalRead(){
+  try{ return JSON.parse(localStorage.getItem(INST_LKEY)||"[]"); }
+  catch(_){ return []; }
+}
+function instLocalWrite(list){
+  try{ localStorage.setItem(INST_LKEY, JSON.stringify(list)); }
+  catch(_){ /* quota */ }
+}
+
+// Snapshot d'une voix sans _buf (transient) pour la sauvegarder.
+function voiceSnapshot(v){
+  // JSON.parse(JSON.stringify(v)) : _buf est non-énumérable, donc ignoré.
+  return JSON.parse(JSON.stringify(v));
+}
+
+async function instSaveCurrent(){
+  if(!synthEd.trackId) return;
+  const name=prompt("Nom du preset ?", voiceShortName(state.voices[synthEd.trackId]));
+  if(!name) return;
+  const config=voiceSnapshot(state.voices[synthEd.trackId]);
+  if(cloudOn()){
+    await api("/instruments",{method:"POST",body:JSON.stringify({name, config})});
+  }else{
+    const list=instLocalRead();
+    list.unshift({id:"loc-"+Date.now(), name, config,
+                  updatedAt:new Date().toISOString()});
+    instLocalWrite(list.slice(0,200));
+  }
+  $("#synthEdMsg").textContent="Preset enregistré : "+name;
+  $("#synthEdMsg").className="msg ok";
+}
+$("#synthEdSavePreset").onclick=async()=>{
+  try{ await instSaveCurrent(); }
+  catch(e){ $("#synthEdMsg").textContent=e.message;
+            $("#synthEdMsg").className="msg err"; }
+};
+
+async function instFetchList(){
+  if(cloudOn()) return (await api("/instruments")).instruments||[];
+  return instLocalRead();
+}
+async function instDelete(id){
+  if(cloudOn() && !String(id).startsWith("loc-")){
+    await api("/instruments/"+id,{method:"DELETE"});
+  }else{
+    instLocalWrite(instLocalRead().filter(i=>i.id!==id));
+  }
+}
+function applyInstrumentToTrack(trackId, config){
+  state.voices[trackId]=normalizeVoice(JSON.parse(JSON.stringify(config)),
+    TRACKS.findIndex(t=>t.id===trackId));
+  ensureSampleBuf(state.voices[trackId]);
+  refreshVoiceRow(trackId);
+  if($("#synthEditorOverlay").classList.contains("show")) renderSynthEditor();
+}
+
+async function openInstLib(){
+  if(!synthEd.trackId){ /* contexte requis */ return; }
+  const trackNum=TRACKS.findIndex(t=>t.id===synthEd.trackId)+1;
+  $("#instLibTrack").textContent=trackNum;
+  $("#instLibTitle").textContent=cloudOn()?"Bibliothèque cloud":"Bibliothèque locale";
+  const list=$("#instLibList"); list.innerHTML="";
+  $("#instLibMsg").textContent="";
+  let items=[];
+  try{ items=await instFetchList(); }
+  catch(e){ $("#instLibMsg").textContent=e.message;
+            $("#instLibMsg").className="msg err"; }
+  if(!items.length){
+    list.innerHTML='<div class="bank-empty">— aucun preset enregistré —</div>';
+  }else{
+    items.forEach(it=>{
+      const row=document.createElement("div"); row.className="bankrow";
+      const cfg=it.config||{};
+      const subtype=cfg.type||"builtin";
+      const when=it.updatedAt?new Date(it.updatedAt)
+                   .toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}):"";
+      row.innerHTML='<span class="bn">'+escapeHtml(it.name||"—")+'</span>'+
+        '<span class="bm">'+subtype.toUpperCase()+' '+when+'</span>';
+      const load=mkBtn("Load",()=>{
+        applyInstrumentToTrack(synthEd.trackId, cfg);
+        hide("instLibOverlay");
+        $("#synthEdMsg").textContent="Preset chargé : "+(it.name||"");
+        $("#synthEdMsg").className="msg ok";
+      });
+      const del =mkBtn("Del",async()=>{
+        try{ await instDelete(it.id); openInstLib(); }
+        catch(e){ $("#instLibMsg").textContent=e.message;
+                  $("#instLibMsg").className="msg err"; }
+      });
+      row.appendChild(load); row.appendChild(del);
+      list.appendChild(row);
+    });
+  }
+  show("instLibOverlay");
+}
+$("#synthEdLib").onclick=openInstLib;
 
 /* =================================================================
    11. DÉMARRAGE

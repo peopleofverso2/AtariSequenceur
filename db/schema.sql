@@ -75,3 +75,27 @@ drop trigger if exists songs_set_updated_at on public.songs;
 create trigger songs_set_updated_at
     before update on public.songs
     for each row execute function public.set_updated_at();
+
+-- ============================================================
+-- instruments : bibliothèque de voix (presets FM ou échantillons)
+-- réutilisables d'un pattern à l'autre. config porte la
+-- configuration JSON (type fm/sample, ADSR, ratio, index, données
+-- du sample base64, etc.). Les patterns continuent à embarquer
+-- leurs propres voix : la bibliothèque sert à recharger un preset.
+-- ============================================================
+create table if not exists public.instruments (
+    id          uuid primary key default gen_random_uuid(),
+    user_id     uuid not null references public.users (id) on delete cascade,
+    name        text not null check (char_length(name) between 1 and 60),
+    config      jsonb not null default '{}'::jsonb,
+    created_at  timestamptz not null default now(),
+    updated_at  timestamptz not null default now()
+);
+
+create index if not exists instruments_user_updated_idx
+    on public.instruments (user_id, updated_at desc);
+
+drop trigger if exists instruments_set_updated_at on public.instruments;
+create trigger instruments_set_updated_at
+    before update on public.instruments
+    for each row execute function public.set_updated_at();
