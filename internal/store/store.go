@@ -1,23 +1,73 @@
-// Package store persists sequencer patterns in Supabase Postgres.
+// Package store persists users, patterns and songs in Postgres.
 //
-// Every query is scoped by user_id. Row Level Security in the database is a
-// second line of defence; this package enforces ownership in the query
-// itself so a backend bug cannot leak another user's patterns.
+// Pattern and song queries are scoped by user_id at the SQL layer so a
+// handler bug cannot leak another account's data. User rows live in
+// their own table and are referenced by the patterns/songs FK.
 package store
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound is returned when a pattern does not exist or is not owned by
-// the requesting user.
-var ErrNotFound = errors.New("pattern not found")
+// ErrNotFound is returned when a row does not exist (or, for owned rows,
+// is not owned by the requesting user).
+var ErrNotFound = errors.New("not found")
+
+// ErrEmailTaken is returned by CreateUser when the email is already used.
+var ErrEmailTaken = errors.New("email already registered")
+
+// User is an application account. PasswordHash holds the bcrypt digest.
+type User struct {
+	ID           string
+	Email        string
+	PasswordHash []byte
+	CreatedAt    time.Time
+}
+
+// CreateUser inserts a new user. The unique constraint on email is mapped
+// to ErrEmailTaken so handlers can return a clear 409.
+func (s *Store) CreateUser(ctx context.Context, email string, passwordHash []byte) (User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO users (email, password_hash)
+		      VALUES ($1, $2)
+		   RETURNING id, email, password_hash, created_at`,
+		email, passwordHash).
+		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt)
+	if err != nil {
+		// pgx surfaces "23505" (unique_violation) via PgError.Code, but
+		// importing the pgconn package just to type-assert is overkill;
+		// a substring check on the error string is enough for the one
+		// constraint we care about and keeps deps minimal.
+		if strings.Contains(err.Error(), "users_email_key") ||
+			strings.Contains(err.Error(), "duplicate key") {
+			return User{}, ErrEmailTaken
+		}
+		return User{}, err
+	}
+	return u, nil
+}
+
+// GetUserByEmail returns the user matching the given (lower-cased) email.
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, email, password_hash, created_at
+		   FROM users
+		  WHERE email = $1`, email).
+		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	return u, err
+}
 
 // Pattern is a saved sequencer grid. Steps holds the raw JSON object
 // mapping each track id to its array of on/off steps.

@@ -1,0 +1,28 @@
+# Postgres pour le dev local. Le schéma est appliqué automatiquement
+# au premier démarrage via le mount classique /docker-entrypoint-initdb.d.
+#
+#   docker compose up -d
+#   # une fois prêt :
+#   set -a && source .env && set +a && go run .
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: atari-pg
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: atari
+    ports:
+      - "5432:5432"
+    volumes:
+      - atari-pg-data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d atari"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+volumes:
+  atari-pg-data:

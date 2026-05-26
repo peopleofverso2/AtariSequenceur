@@ -495,10 +495,11 @@
 <!-- dialogue : connexion -->
 <div class="overlay" id="authOverlay">
   <div class="dialog">
-    <div class="titlebar"><div class="title"><span>Connexion Supabase</span></div></div>
+    <div class="titlebar"><div class="title"><span>Connexion</span></div></div>
     <div class="dlg-body">
-      <p>Connecte-toi pour stocker tes patterns dans le cloud (Supabase).
-         Sans connexion, la banque reste locale à ce navigateur.</p>
+      <p>Crée un compte ou connecte-toi pour synchroniser tes patterns
+         et tes songs dans le cloud. Sans compte, la banque reste locale
+         à ce navigateur.</p>
       <div class="dlg-row"><label for="email">E-mail</label>
         <input class="text-input" id="email" type="email" autocomplete="email"></div>
       <div class="dlg-row"><label for="pass">Mot&nbsp;de&nbsp;passe</label>
@@ -569,9 +570,6 @@
   </div>
 </div>
 
-<!-- supabase-js : optionnel, échec silencieux si CDN injoignable -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
-        onerror="window.__sbDown=true"></script>
 <script>
 "use strict";
 /* =================================================================
@@ -1302,39 +1300,59 @@ document.addEventListener("keydown",e=>{
 });
 
 /* =================================================================
-   7. SUPABASE  (auth + cloud) — dégradation gracieuse si absent
+   7. AUTH  (compte applicatif + JWT maison) — dégradation gracieuse
    ================================================================= */
-let sb=null, session=null;
+// auth.token : JWT signé par le backend (HS256 + JWT_SECRET).
+// auth.user  : { id, email } extrait de la réponse login/signup.
+// auth.expiresAt : epoch s ; on purge si dépassé.
+// auth.cloud : flag remonté par /config (true = backend prêt).
+const AUTH_LKEY="atari-seq:auth";
+const auth={token:null,user:null,expiresAt:0,cloud:false};
+
+function authLoad(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(AUTH_LKEY)||"null");
+    if(!raw || !raw.token) return;
+    if(raw.expiresAt && raw.expiresAt*1000 < Date.now()) return; // expiré
+    auth.token=raw.token; auth.user=raw.user||null;
+    auth.expiresAt=raw.expiresAt||0;
+  }catch(_){}
+}
+function authPersist(){
+  try{ localStorage.setItem(AUTH_LKEY,JSON.stringify(
+    {token:auth.token,user:auth.user,expiresAt:auth.expiresAt})); }
+  catch(_){}
+}
+function authClear(){
+  auth.token=null; auth.user=null; auth.expiresAt=0;
+  try{ localStorage.removeItem(AUTH_LKEY); }catch(_){}
+}
 
 async function initCloud(){
+  authLoad();
   let cfg=null;
   try{
     const r=await fetch("/config");
     if(r.ok) cfg=await r.json();
   }catch(_){/* pas de backend : mode hors-ligne */}
-  if(cfg && cfg.supabaseUrl && cfg.supabaseAnonKey
-        && !window.__sbDown && window.supabase){
-    sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
-    const {data}=await sb.auth.getSession();
-    session=data.session;
-    sb.auth.onAuthStateChange((_e,s)=>{session=s;renderAuth();});
-  }
+  auth.cloud = !!(cfg && cfg.cloud);
   renderAuth();
 }
-const cloudOn = ()=> !!(sb && session);
+const cloudOn = ()=> !!(auth.cloud && auth.token);
 
 function renderAuth(){
   const st=$("#status"), btn=$("#auth");
   if(cloudOn()){
-    st.textContent="● "+(session.user.email||"connecté");
+    st.textContent="● "+(auth.user?.email||"connecté");
     st.classList.add("online");
     btn.textContent="Logout";
+    btn.disabled=false;
   }else{
-    st.textContent = sb ? "Hors-ligne — banque locale"
-                        : "Hors-ligne — Supabase non configuré";
+    st.textContent = auth.cloud ? "Hors-ligne — banque locale"
+                                : "Hors-ligne — backend non configuré";
     st.classList.remove("online");
     btn.textContent="Login";
-    btn.disabled = !sb;
+    btn.disabled = !auth.cloud;
   }
 }
 
@@ -1343,14 +1361,28 @@ function renderAuth(){
    ================================================================= */
 async function api(path,opts={}){
   const h=Object.assign({"Content-Type":"application/json"},opts.headers||{});
-  if(session) h["Authorization"]="Bearer "+session.access_token;
+  if(auth.token) h["Authorization"]="Bearer "+auth.token;
   const r=await fetch("/api"+path,Object.assign({},opts,{headers:h}));
+  if(r.status===401){
+    // Token périmé ou rejeté : on purge et on demande une re-connexion.
+    authClear(); renderAuth();
+  }
   if(!r.ok){
     let m="erreur "+r.status;
     try{ m=(await r.json()).error||m; }catch(_){}
     throw new Error(m);
   }
   return r.status===204?null:r.json();
+}
+
+// Réutilisé par login + signup : pose le token et persiste.
+function authAcceptResponse(res){
+  if(!res || !res.token) throw new Error("réponse d'auth invalide");
+  auth.token=res.token;
+  auth.user=res.user||null;
+  auth.expiresAt=res.expiresAt||0;
+  authPersist();
+  renderAuth();
 }
 
 /* =================================================================
@@ -1510,7 +1542,11 @@ function flash(btn,txt){
 
 /* ---- auth ---- */
 $("#auth").onclick=async()=>{
-  if(cloudOn()){ await sb.auth.signOut(); session=null; renderAuth(); return; }
+  if(cloudOn()){
+    // déconnexion locale ; le token reste valide côté serveur jusqu'à
+    // expiration (pas de blacklist), c'est acceptable pour cette app.
+    authClear(); renderAuth(); return;
+  }
   authMsg(""); show("authOverlay");
 };
 function authMsg(t,err){
@@ -1518,21 +1554,21 @@ function authMsg(t,err){
   m.className="msg "+(err?"err":"ok");
 }
 $("#doLogin").onclick=async()=>{
-  if(!sb) return;
+  if(!auth.cloud) return;
   try{
-    const {data,error}=await sb.auth.signInWithPassword({
-      email:$("#email").value.trim(), password:$("#pass").value});
-    if(error) throw error;
-    session=data.session; renderAuth(); hide("authOverlay");
+    const res=await api("/login",{method:"POST",body:JSON.stringify({
+      email:$("#email").value.trim(), password:$("#pass").value})});
+    authAcceptResponse(res);
+    hide("authOverlay");
   }catch(e){ authMsg(e.message||"échec de connexion",true); }
 };
 $("#doSignup").onclick=async()=>{
-  if(!sb) return;
+  if(!auth.cloud) return;
   try{
-    const {error}=await sb.auth.signUp({
-      email:$("#email").value.trim(), password:$("#pass").value});
-    if(error) throw error;
-    authMsg("Compte créé. Vérifie tes e-mails puis connecte-toi.",false);
+    const res=await api("/signup",{method:"POST",body:JSON.stringify({
+      email:$("#email").value.trim(), password:$("#pass").value})});
+    authAcceptResponse(res);
+    hide("authOverlay");
   }catch(e){ authMsg(e.message||"échec de création",true); }
 };
 

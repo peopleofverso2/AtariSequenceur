@@ -21,11 +21,13 @@ const maxBody = 64 * 1024
 // API holds the dependencies of the pattern handlers.
 type API struct {
 	store *store.Store
+	auth  *auth.Auth
 }
 
 // New builds an API. The store may be nil when DATABASE_URL is unset, in
-// which case every handler responds 503.
-func New(s *store.Store) *API { return &API{store: s} }
+// which case every handler responds 503. The auth dependency is used by
+// the signup/login handlers to mint tokens.
+func New(s *store.Store, a *auth.Auth) *API { return &API{store: s, auth: a} }
 
 // patternInput is the accepted request payload for create/update.
 type patternInput struct {

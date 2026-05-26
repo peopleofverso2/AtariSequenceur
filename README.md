@@ -1,7 +1,7 @@
 # STEP·SEQ — séquenceur pas-à-pas
 
 Un séquenceur de rythmes jouable dans le navigateur, esthétique **GEM / Atari ST**,
-livré comme une vraie web app **Go + Cloud Run + Supabase**.
+livré comme une vraie web app **Go + Cloud Run + Cloud SQL Postgres**.
 
 - **24 pistes** ; instrument réglable par piste, **hauteur réglable pas à pas** (glissé vertical du pad ou flèches ↑/↓)
 - **subdivision par pas** : clic droit (ou ←/→) découpe un pas en 2-4 répétitions régulières — croches, triolets, roulements
@@ -11,22 +11,25 @@ livré comme une vraie web app **Go + Cloud Run + Supabase**.
 - sortie **MIDI** (Web MIDI : notes + horloge 24 ppqn) et **export `.mid`**
 - **entrée MIDI** : un clavier USB joue les voix, saisit la note dans le pad survolé, ou **enregistre en live** (quantisé sur le pas le plus proche pendant la lecture)
 - **mode song** : enchaîne plusieurs patterns sauvegardés, chacun joué *×N* fois, avec changement de tempo/longueur à chaque pattern
-- sauvegarde des patterns **et des songs** : **cloud** via Supabase quand on est connecté,
-  **locale** sinon — l'app reste 100 % jouable hors-ligne
+- comptes applicatifs : signup/login bcrypt + JWT maison (HS256), pas de dépendance d'auth tierce
+- sauvegarde des patterns **et des songs** : **cloud** (Cloud SQL) quand on est connecté,
+  **locale** (`localStorage`) sinon — l'app reste 100 % jouable hors-ligne
 
 ## Architecture
 
 ```
 navigateur ──HTTP──► Cloud Run (binaire Go)
    │                      │
-   │ supabase-js          ├─ /            frontend embarqué (go:embed)
-   │ (auth, JWT)          ├─ /healthz     sonde Cloud Run
-   ▼                      ├─ /config      URL + clé anon Supabase
-Supabase Auth             ├─ /api/patterns   CRUD (JWT requis)
-                          └─ /api/songs      CRUD (JWT requis)
-                               │
-                               ▼ pgx pool
-                          Supabase Postgres (RLS)
+   │ JWT Bearer           ├─ /                  frontend embarqué (go:embed)
+   │                      ├─ /healthz           sonde Cloud Run
+   │                      ├─ /config            feature flag "cloud"
+   │                      ├─ /api/signup        bcrypt + token
+   │                      ├─ /api/login         vérif + token
+   ▼                      ├─ /api/patterns      CRUD (JWT requis)
+   localStorage           └─ /api/songs         CRUD (JWT requis)
+   (fallback                    │
+    hors-ligne)                 ▼ pgx pool
+                          Cloud SQL Postgres
 ```
 
 Choix structurants :
@@ -35,73 +38,84 @@ Choix structurants :
   binaire via `go:embed`. La grille est sensible à la performance (tête de
   lecture rafraîchie à chaque double-croche) : basculer des classes CSS sur
   le DOM est ici plus direct et plus léger qu'un cycle de rendu React.
-- **Asynchrone & perf** : pool `pgxpool` borné (8 conn. max, le *pooler*
-  Supabase gère le fan-in), `context` propagé sur toute requête, timeouts,
-  arrêt gracieux sur `SIGTERM`.
-- **Auth** : les JWT Supabase (HS256) sont vérifiés avec la seule librairie
-  standard (`crypto/hmac`) — chemin d'authentification court et auditable.
-- **Défense en profondeur** : chaque requête SQL filtre par `user_id`, *et*
-  la table active Row Level Security.
+- **Asynchrone & perf** : pool `pgxpool` borné (8 conn. max), `context`
+  propagé sur toute requête, timeouts, arrêt gracieux sur `SIGTERM`.
+- **Auth** : compte applicatif → bcrypt (`golang.org/x/crypto/bcrypt`) côté
+  serveur, JWT HS256 signés avec un secret de déploiement
+  (`JWT_SECRET`). Vérification *constant-time* via `hmac.Equal` ; refus
+  explicite de toute autre `alg` que HS256 pour neutraliser l'attaque
+  *algorithm confusion*. Code complet : `internal/auth/auth.go`.
+- **Isolation des données** : chaque requête SQL filtre par `user_id` et
+  les tables ont une FK `users(id) ON DELETE CASCADE`.
 
 ```
 .
 ├── main.go                  routeur Chi, pool pgx, arrêt gracieux
 ├── internal/
-│   ├── auth/                vérification JWT HS256 (stdlib)
-│   ├── store/               accès Postgres (pgx) — patterns + songs
-│   └── handlers/            API JSON patterns + songs
+│   ├── auth/                bcrypt + JWT HS256 (stdlib + x/crypto)
+│   ├── store/               accès Postgres (pgx) — users + patterns + songs
+│   └── handlers/            API JSON : signup, login, patterns, songs
 ├── web/index.html           frontend séquenceur (embarqué)
-├── supabase/schema.sql      tables (patterns, songs) + triggers + RLS
+├── db/schema.sql            tables (users, patterns, songs) + triggers
+├── docker-compose.yml       Postgres pour le dev local
 └── Dockerfile               build multi-stage, image distroless
 ```
-
-## Configuration Supabase
-
-1. Créer un projet sur [supabase.com](https://supabase.com).
-2. SQL Editor → coller et exécuter `supabase/schema.sql`.
-3. Authentication → Providers → activer **Email**.
-4. Relever, dans *Project Settings* :
-   - `DATABASE_URL` — Database → Connection string → **Transaction pooler**
-     (port `6543`, recommandé pour Cloud Run).
-   - `SUPABASE_JWT_SECRET` — API → JWT Settings → JWT Secret.
-   - `SUPABASE_URL` et `SUPABASE_ANON_KEY` — API.
-
-> Si le projet utilise les nouvelles *signing keys* asymétriques (ES256/RS256),
-> remplacer `parse()` dans `internal/auth/auth.go` par un vérificateur JWKS.
 
 ## Développement local
 
 ```bash
-cp .env.example .env        # puis renseigner les valeurs
+# 1) Postgres dans Docker, schéma appliqué au premier boot
+docker compose up -d
+
+# 2) variables d'environnement
+cp .env.example .env       # le fichier par défaut pointe sur localhost:5432
+
+# 3) lancer le serveur
 set -a && source .env && set +a
-go mod tidy                 # génère go.sum
 go run .
 # → http://localhost:8080
 ```
 
 Sans `DATABASE_URL`, le serveur démarre quand même : le séquenceur est
-jouable, seul le stockage cloud des patterns est désactivé.
+jouable, seuls les comptes et le stockage cloud sont désactivés
+(la banque tombe en `localStorage`).
 
-## Déploiement Cloud Run
+## Déploiement Cloud Run + Cloud SQL
 
 ```bash
-gcloud run deploy step-seq \
-  --source . \
-  --region europe-west1 \
+PROJECT=peopleofversoapp
+REGION=europe-west1
+INSTANCE=atari-pg
+
+# 1) Cloud SQL (Postgres 16, smallest tier)
+gcloud sql instances create $INSTANCE \
+  --project=$PROJECT \
+  --database-version=POSTGRES_16 \
+  --tier=db-f1-micro \
+  --region=$REGION \
+  --root-password="$(openssl rand -base64 24)"
+gcloud sql databases create atari --instance=$INSTANCE --project=$PROJECT
+gcloud sql users create atari --instance=$INSTANCE --project=$PROJECT \
+  --password="$(openssl rand -base64 24)"   # ⚠ noter ce mot de passe
+
+# 2) Appliquer le schéma (via Cloud SQL Proxy ou l'editeur web)
+gcloud sql connect $INSTANCE --user=postgres --project=$PROJECT < db/schema.sql
+
+# 3) Secrets Cloud Run
+printf '%s' "postgres://atari:<password>@/atari?host=/cloudsql/$PROJECT:$REGION:$INSTANCE" | \
+  gcloud secrets create atari-db --data-file=- --project=$PROJECT
+printf '%s' "$(openssl rand -base64 48)" | \
+  gcloud secrets create atari-jwt --data-file=- --project=$PROJECT
+
+# 4) Deploy
+gcloud run deploy atari-seq \
+  --project=$PROJECT \
+  --source=. \
+  --region=$REGION \
   --allow-unauthenticated \
-  --set-env-vars "SUPABASE_URL=https://<ref>.supabase.co" \
-  --set-env-vars "SUPABASE_ANON_KEY=<anon-key>" \
-  --set-secrets  "DATABASE_URL=step-seq-db:latest" \
-  --set-secrets  "SUPABASE_JWT_SECRET=step-seq-jwt:latest"
-```
-
-Créer les secrets sensibles au préalable :
-
-```bash
-printf '%s' "<connection-string>" | \
-  gcloud secrets create step-seq-db --data-file=-
-printf '%s' "<jwt-secret>" | \
-  gcloud secrets create step-seq-jwt --data-file=-
+  --add-cloudsql-instances=$PROJECT:$REGION:$INSTANCE \
+  --set-secrets=DATABASE_URL=atari-db:latest \
+  --set-secrets=JWT_SECRET=atari-jwt:latest
 ```
 
 Cloud Run injecte `PORT` automatiquement ; `/healthz` sert de sonde.

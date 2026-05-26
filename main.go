@@ -46,20 +46,16 @@ func main() {
 }
 
 type config struct {
-	Port            string
-	DatabaseURL     string
-	JWTSecret       string
-	SupabaseURL     string
-	SupabaseAnonKey string
+	Port        string
+	DatabaseURL string
+	JWTSecret   string
 }
 
 func loadConfig() config {
 	return config{
-		Port:            env("PORT", "8080"),
-		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		JWTSecret:       os.Getenv("SUPABASE_JWT_SECRET"),
-		SupabaseURL:     os.Getenv("SUPABASE_URL"),
-		SupabaseAnonKey: os.Getenv("SUPABASE_ANON_KEY"),
+		Port:        env("PORT", "8080"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		JWTSecret:   os.Getenv("JWT_SECRET"),
 	}
 }
 
@@ -73,8 +69,9 @@ func run() error {
 
 	// --- Database: a bounded pgx pool ---------------------------------
 	// The pool is sized small on purpose: Cloud Run scales horizontally,
-	// so every instance keeps only a few connections and relies on the
-	// Supabase connection pooler (port 6543) for fan-in.
+	// so each instance keeps only a few connections and Cloud SQL's own
+	// connection limits do the fan-in. Local dev points DATABASE_URL at
+	// a docker-compose Postgres on 5432.
 	var st *store.Store
 	if cfg.DatabaseURL != "" {
 		poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
@@ -95,11 +92,14 @@ func run() error {
 		st = store.New(pool)
 		slog.Info("database pool ready", "max_conns", poolCfg.MaxConns)
 	} else {
-		slog.Warn("DATABASE_URL not set: cloud pattern storage disabled")
+		slog.Warn("DATABASE_URL not set: persistence disabled")
 	}
 
-	api := handlers.New(st)
-	verifier := auth.NewVerifier(cfg.JWTSecret)
+	authSvc := auth.New(cfg.JWTSecret)
+	if !authSvc.Configured() {
+		slog.Warn("JWT_SECRET not set: signup/login disabled")
+	}
+	api := handlers.New(st, authSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -114,28 +114,32 @@ func run() error {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	// Runtime config consumed by the frontend. The anon key is designed
-	// to be public, so exposing it here is safe.
+	// /config tells the frontend whether cloud features are available.
+	// No secrets here — purely a feature flag for the UI.
 	r.Get("/config", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{
-			"supabaseUrl":     cfg.SupabaseURL,
-			"supabaseAnonKey": cfg.SupabaseAnonKey,
+		writeJSON(w, http.StatusOK, map[string]bool{
+			"cloud": st != nil && authSvc.Configured(),
 		})
 	})
 
-	// Authenticated JSON API: every route requires a valid Supabase JWT.
+	// JSON API. Signup/login are public; everything else is behind the
+	// bearer-token middleware.
 	r.Route("/api", func(r chi.Router) {
-		r.Use(verifier.Middleware)
-		r.Get("/patterns", api.ListPatterns)
-		r.Post("/patterns", api.CreatePattern)
-		r.Get("/patterns/{id}", api.GetPattern)
-		r.Put("/patterns/{id}", api.UpdatePattern)
-		r.Delete("/patterns/{id}", api.DeletePattern)
-		r.Get("/songs", api.ListSongs)
-		r.Post("/songs", api.CreateSong)
-		r.Get("/songs/{id}", api.GetSong)
-		r.Put("/songs/{id}", api.UpdateSong)
-		r.Delete("/songs/{id}", api.DeleteSong)
+		r.Post("/signup", api.Signup)
+		r.Post("/login", api.Login)
+		r.Group(func(r chi.Router) {
+			r.Use(authSvc.Middleware)
+			r.Get("/patterns", api.ListPatterns)
+			r.Post("/patterns", api.CreatePattern)
+			r.Get("/patterns/{id}", api.GetPattern)
+			r.Put("/patterns/{id}", api.UpdatePattern)
+			r.Delete("/patterns/{id}", api.DeletePattern)
+			r.Get("/songs", api.ListSongs)
+			r.Post("/songs", api.CreateSong)
+			r.Get("/songs/{id}", api.GetSong)
+			r.Put("/songs/{id}", api.UpdateSong)
+			r.Delete("/songs/{id}", api.DeleteSong)
+		})
 	})
 
 	// Embedded single-page frontend.

@@ -1,11 +1,8 @@
-// Package auth verifies Supabase-issued JWTs.
+// Package auth handles password hashing, JWT signing and JWT verification.
 //
-// Supabase signs access tokens with HS256 using the project's legacy JWT
-// secret. Verification needs only HMAC-SHA256, so this package depends on
-// the standard library alone — the auth path stays small and auditable.
-//
-// If your Supabase project has migrated to asymmetric signing keys
-// (ES256/RS256 via JWKS), replace parse() with a JWKS-based verifier.
+// Tokens are HS256 with a per-deployment secret (env JWT_SECRET). Both
+// signing and verification rely on the standard library + bcrypt — the
+// auth path stays small and auditable.
 package auth
 
 import (
@@ -18,34 +15,89 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type ctxKey int
 
 const userIDKey ctxKey = iota
 
+// DefaultTTL is the lifetime applied to newly minted tokens when no TTL
+// is supplied. 30 days mirrors a "remember me" web session.
+const DefaultTTL = 30 * 24 * time.Hour
+
+// ErrBadCredentials is returned when an email/password pair fails. The
+// caller maps it to a 401 without leaking which half was wrong.
+var ErrBadCredentials = errors.New("invalid email or password")
+
 var errInvalidToken = errors.New("invalid token")
 
-// Verifier validates tokens signed with a shared HS256 secret.
-type Verifier struct {
+// Auth signs and verifies HS256 JWTs and hashes passwords with bcrypt.
+type Auth struct {
 	secret []byte
+	ttl    time.Duration
 }
 
-// NewVerifier builds a Verifier from the Supabase JWT secret.
-func NewVerifier(secret string) *Verifier {
-	return &Verifier{secret: []byte(secret)}
+// New builds an Auth backed by the given shared secret.
+func New(secret string) *Auth {
+	return &Auth{secret: []byte(secret), ttl: DefaultTTL}
 }
+
+// Configured reports whether a non-empty secret was supplied. Handlers
+// use it to fail fast with a 503 when auth is unavailable.
+func (a *Auth) Configured() bool { return len(a.secret) > 0 }
+
+// HashPassword returns a bcrypt hash suitable for storage.
+func HashPassword(plaintext string) ([]byte, error) {
+	return bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)
+}
+
+// CheckPassword reports whether a bcrypt hash matches the candidate.
+// It maps every failure to ErrBadCredentials so handlers don't have to
+// distinguish between a missing user and a wrong password.
+func CheckPassword(hash []byte, candidate string) error {
+	if err := bcrypt.CompareHashAndPassword(hash, []byte(candidate)); err != nil {
+		return ErrBadCredentials
+	}
+	return nil
+}
+
+// Sign returns a fresh HS256 token for the given user id.
+func (a *Auth) Sign(userID string) (string, error) {
+	if !a.Configured() {
+		return "", errors.New("auth: secret not configured")
+	}
+	header := `{"alg":"HS256","typ":"JWT"}`
+	exp := time.Now().Add(a.ttl).Unix()
+	payload, err := json.Marshal(claims{Sub: userID, Exp: exp})
+	if err != nil {
+		return "", err
+	}
+	h64 := base64.RawURLEncoding.EncodeToString([]byte(header))
+	p64 := base64.RawURLEncoding.EncodeToString(payload)
+	signing := h64 + "." + p64
+
+	mac := hmac.New(sha256.New, a.secret)
+	mac.Write([]byte(signing))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return signing + "." + sig, nil
+}
+
+// ExpiresAt returns the absolute expiry of tokens minted right now.
+// Handy for the login response so the client can plan a refresh.
+func (a *Auth) ExpiresAt() time.Time { return time.Now().Add(a.ttl) }
 
 type claims struct {
 	Sub string `json:"sub"`
 	Exp int64  `json:"exp"`
 }
 
-// Middleware rejects requests lacking a valid bearer token and stores the
-// authenticated user id in the request context for downstream handlers.
-func (v *Verifier) Middleware(next http.Handler) http.Handler {
+// Middleware rejects requests lacking a valid bearer token and stores
+// the authenticated user id in the request context.
+func (a *Auth) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(v.secret) == 0 {
+		if !a.Configured() {
 			deny(w, http.StatusServiceUnavailable, "authentication is not configured")
 			return
 		}
@@ -54,7 +106,7 @@ func (v *Verifier) Middleware(next http.Handler) http.Handler {
 			deny(w, http.StatusUnauthorized, "missing bearer token")
 			return
 		}
-		c, err := v.parse(token)
+		c, err := a.parse(token)
 		if err != nil {
 			deny(w, http.StatusUnauthorized, "invalid or expired token")
 			return
@@ -81,7 +133,7 @@ func bearerToken(r *http.Request) string {
 }
 
 // parse verifies an HS256 JWT's signature and expiry.
-func (v *Verifier) parse(token string) (*claims, error) {
+func (a *Auth) parse(token string) (*claims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil, errInvalidToken
@@ -101,7 +153,7 @@ func (v *Verifier) parse(token string) (*claims, error) {
 	}
 
 	// Recompute the signature and compare in constant time.
-	mac := hmac.New(sha256.New, v.secret)
+	mac := hmac.New(sha256.New, a.secret)
 	mac.Write([]byte(parts[0] + "." + parts[1]))
 	expected := mac.Sum(nil)
 
