@@ -620,6 +620,21 @@
   </div>
 </div>
 
+<!-- dialogue : saisie de nom (remplace window.prompt qui est parfois bloqué) -->
+<div class="overlay" id="namePromptOverlay">
+  <div class="dialog">
+    <div class="titlebar"><div class="title"><span id="nameTitle">Nom ?</span></div></div>
+    <div class="dlg-body">
+      <p id="nameMsg" style="font-size:11px;line-height:1.5;margin:0">&nbsp;</p>
+      <input class="text-input" id="nameInput" maxlength="60" autocomplete="off">
+      <div class="dlg-actions">
+        <button class="btn" id="nameCancel">Annuler</button>
+        <button class="btn go" id="nameOK">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- dialogue : éditeur de synthé (par piste) -->
 <div class="overlay" id="synthEditorOverlay">
   <div class="dialog">
@@ -3055,9 +3070,39 @@ function voiceSnapshot(v){
   return JSON.parse(JSON.stringify(v));
 }
 
+// Remplaçant de window.prompt() : certaines visionneuses (iframes
+// sandboxées, in-app browsers, etc.) le bloquent. La promesse résout
+// avec la valeur saisie, ou null si Annuler / fermeture.
+let _namePromptResolver=null;
+function askName(title, defaultValue, helpMsg){
+  $("#nameTitle").textContent=title||"Nom ?";
+  $("#nameMsg").textContent=helpMsg||"";
+  const inp=$("#nameInput");
+  inp.value=defaultValue||"";
+  show("namePromptOverlay");
+  setTimeout(()=>{ inp.focus(); inp.select(); },20);
+  return new Promise(res=>{ _namePromptResolver=res; });
+}
+function _nameClose(value){
+  hide("namePromptOverlay");
+  const r=_namePromptResolver; _namePromptResolver=null;
+  if(r) r(value);
+}
+$("#nameOK").onclick=()=>{
+  const v=($("#nameInput").value||"").trim();
+  _nameClose(v||null);
+};
+$("#nameCancel").onclick=()=>_nameClose(null);
+$("#nameInput").addEventListener("keydown",e=>{
+  if(e.code==="Enter"){ e.preventDefault(); $("#nameOK").click(); }
+  else if(e.code==="Escape"){ e.preventDefault(); _nameClose(null); }
+});
+
 async function instSaveCurrent(){
   if(!synthEd.trackId) return;
-  const name=prompt("Nom du preset ?", voiceShortName(state.voices[synthEd.trackId]));
+  const name=await askName("Nom du preset",
+    voiceShortName(state.voices[synthEd.trackId]),
+    "Le preset sera ajouté à ta bibliothèque (cloud si connecté, local sinon).");
   if(!name) return;
   const config=voiceSnapshot(state.voices[synthEd.trackId]);
   if(cloudOn()){
