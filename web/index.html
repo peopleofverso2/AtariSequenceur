@@ -1825,9 +1825,26 @@ function buildGrid(){
     }
   });
 }
+// Nom affiché sur la piste : suit le son utilisé.
+//   - builtin : KICK / SNARE / …  (catalogue chiptune)
+//   - sample  : nom du sample (fichier importé, "mic HH:MM:SS",
+//               ou nom du preset chargé)
+//   - fm      : nom du preset si chargé depuis la biblio, sinon "FM"
+function voiceLabelText(v){
+  if(!v) return "—";
+  if(v.presetName) return v.presetName.toUpperCase();
+  if(!v.type || v.type==="builtin"){
+    const inst=INSTRUMENTS[v.inst];
+    return inst ? inst.name : "?";
+  }
+  if(v.type==="sample") return (v.sample && v.sample.name || "SAMPLE").toUpperCase();
+  if(v.type==="fm") return "FM";
+  return "?";
+}
 function refreshLabel(id){
   const v=state.voices[id], lab=labelEls[id];
-  lab.querySelector(".name").textContent=INSTRUMENTS[v.inst].name;
+  if(!lab) return;
+  lab.querySelector(".name").textContent=voiceLabelText(v);
   lab.querySelector(".note").textContent=noteName(v.pitch);
 }
 function refreshLabels(){ TRACKS.forEach(t=>refreshLabel(t.id)); }
@@ -2400,6 +2417,7 @@ function voiceTypeLabel(v){
 }
 function voiceShortName(v){
   if(!v) return "—";
+  if(v.presetName) return v.presetName;
   if(!v.type || v.type==="builtin") return (INSTRUMENTS[v.inst]&&INSTRUMENTS[v.inst].name)||"?";
   if(v.type==="fm") return "FM "+v.fm.ratio.toFixed(2)+":1 i"+v.fm.index.toFixed(1);
   if(v.type==="sample") return v.sample.name||"(vide)";
@@ -2908,6 +2926,14 @@ $("#synthEdInst").onchange=e=>{
   auditionNote(synthEd.trackId, state.voices[synthEd.trackId].pitch);
 };
 
+// Marque la voix comme « éditée » (efface le nom de preset hérité pour
+// que le label ne mente plus) puis rafraîchit l'affichage.
+function markVoiceEdit(){
+  if(!synthEd.trackId) return;
+  delete state.voices[synthEd.trackId].presetName;
+  refreshVoiceRow(synthEd.trackId);
+}
+
 // FM bindings — chaque slider met à jour la voix + l'affichage du readout
 function bindFloat(sliderId, getRef, setRef, decimals){
   const sl=$(sliderId), out=$(sliderId+"Out");
@@ -2915,13 +2941,13 @@ function bindFloat(sliderId, getRef, setRef, decimals){
     const v=+sl.value;
     setRef(v);
     out.textContent=fmtFloat(v,decimals);
-    if(synthEd.trackId) refreshVoiceRow(synthEd.trackId);
+    markVoiceEdit();
   });
 }
 function vFM(){ return state.voices[synthEd.trackId].fm; }
 function vSamp(){ return state.voices[synthEd.trackId].sample; }
-$("#fmCarWave").onchange=e=>{ vFM().carrierWave=e.target.value; };
-$("#fmModWave").onchange=e=>{ vFM().modulatorWave=e.target.value; };
+$("#fmCarWave").onchange=e=>{ vFM().carrierWave=e.target.value; markVoiceEdit(); };
+$("#fmModWave").onchange=e=>{ vFM().modulatorWave=e.target.value; markVoiceEdit(); };
 bindFloat("#fmRatio", null, v=>{ vFM().ratio=v; }, 2);
 bindFloat("#fmIndex", null, v=>{ vFM().index=v; }, 1);
 bindFloat("#fmAmpA", null, v=>{ vFM().amp.a=v; }, 3);
@@ -2937,15 +2963,17 @@ bindFloat("#fmModR", null, v=>{ vFM().mod.r=v; }, 2);
 $("#sampleBase").addEventListener("input",()=>{
   const v=+$("#sampleBase").value;
   vSamp().basePitch=v; $("#sampleBaseOut").textContent=fmtNote(v);
+  markVoiceEdit();
 });
 bindFloat("#sampAmpA", null, v=>{ vSamp().amp.a=v; }, 3);
 bindFloat("#sampAmpD", null, v=>{ vSamp().amp.d=v; }, 3);
 bindFloat("#sampAmpS", null, v=>{ vSamp().amp.s=v; }, 2);
 bindFloat("#sampAmpR", null, v=>{ vSamp().amp.r=v; }, 2);
-$("#sfmOn").onchange=e=>{ vSamp().fm.enabled=e.target.checked; };
-$("#sfmModWave").onchange=e=>{ vSamp().fm.modulatorWave=e.target.value; };
+$("#sfmOn").onchange=e=>{ vSamp().fm.enabled=e.target.checked; markVoiceEdit(); };
+$("#sfmModWave").onchange=e=>{ vSamp().fm.modulatorWave=e.target.value; markVoiceEdit(); };
 $("#sfmEngine").onchange=e=>{
   vSamp().fm.engine=e.target.value;
+  markVoiceEdit();
   if(e.target.value==="worklet") ensureWorklet().catch(err=>{
     $("#synthEdMsg").textContent="Worklet indisponible : "+err.message;
     $("#synthEdMsg").className="msg err";
@@ -2954,6 +2982,7 @@ $("#sfmEngine").onchange=e=>{
 bindFloat("#sfmRatio", null, v=>{ vSamp().fm.ratio=v; }, 2);
 $("#sfmDepth").addEventListener("input",()=>{
   const v=+$("#sfmDepth").value; vSamp().fm.depth=v; $("#sfmDepthOut").textContent=v|0;
+  markVoiceEdit();
 });
 bindFloat("#sfmEnvA", null, v=>{ vSamp().fm.env.a=v; }, 3);
 bindFloat("#sfmEnvD", null, v=>{ vSamp().fm.env.d=v; }, 3);
@@ -2976,6 +3005,7 @@ $("#sampleFile").onchange=async e=>{
 $("#sampleClear").onclick=()=>{
   const s=vSamp(); s.name="(vide)"; s.data="";
   delete s._buf;
+  delete state.voices[synthEd.trackId].presetName;
   renderSynthEditor(); refreshVoiceRow(synthEd.trackId);
 };
 
@@ -2995,6 +3025,9 @@ async function loadSampleFromBlob(blob, defaultName){
     try{ Object.defineProperty(s,"_buf",
       {value:monoBuf, enumerable:false, writable:true, configurable:true}); }
     catch(_){ s._buf=monoBuf; }
+    // Le nom du sample devient la source de vérité pour le label —
+    // un éventuel presetName hérité est désormais incorrect.
+    delete state.voices[synthEd.trackId].presetName;
     renderSynthEditor(); refreshVoiceRow(synthEd.trackId);
     $("#synthEdMsg").textContent="Sample chargé ("+monoBuf.duration.toFixed(2)+" s, "+(b64.length/1024|0)+" Ko base64)";
     $("#synthEdMsg").className="msg ok";
@@ -3133,9 +3166,10 @@ async function instDelete(id){
     instLocalWrite(instLocalRead().filter(i=>i.id!==id));
   }
 }
-function applyInstrumentToTrack(trackId, config){
+function applyInstrumentToTrack(trackId, config, presetName){
   state.voices[trackId]=normalizeVoice(JSON.parse(JSON.stringify(config)),
     TRACKS.findIndex(t=>t.id===trackId));
+  if(presetName) state.voices[trackId].presetName=presetName;
   ensureSampleBuf(state.voices[trackId]);
   refreshVoiceRow(trackId);
   if($("#synthEditorOverlay").classList.contains("show")) renderSynthEditor();
@@ -3164,7 +3198,7 @@ async function openInstLib(){
       row.innerHTML='<span class="bn">'+escapeHtml(it.name||"—")+'</span>'+
         '<span class="bm">'+subtype.toUpperCase()+' '+when+'</span>';
       const load=mkBtn("Load",()=>{
-        applyInstrumentToTrack(synthEd.trackId, cfg);
+        applyInstrumentToTrack(synthEd.trackId, cfg, it.name);
         hide("instLibOverlay");
         $("#synthEdMsg").textContent="Preset chargé : "+(it.name||"");
         $("#synthEdMsg").className="msg ok";
