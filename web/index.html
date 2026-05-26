@@ -597,9 +597,83 @@
     .matrix{ --label-w:74px }
     .btn{ padding:6px 7px; font-size:10px }
   }
+
+  /* ===========================================================
+     SPLASH SCREEN — monogramme POV au démarrage (~1.8 s)
+     Plein écran, centré ; cliquable pour dismiss immédiat.
+     =========================================================== */
+  #splash{
+    position:fixed;inset:0;z-index:200;
+    background:radial-gradient(circle at center, #2a2444 0%, #0d0a18 80%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;cursor:pointer;user-select:none;
+    animation:splashIn .35s ease-out, splashOut .55s ease-in 1.4s forwards;
+  }
+  #splash[data-dismiss="true"]{ animation:splashOut .25s ease-in forwards }
+  #splash .pov{
+    display:flex;align-items:flex-end;gap:6px;
+    color:var(--beam);
+    font-family:var(--mono);font-weight:700;
+    text-shadow:0 0 18px var(--beam),0 0 4px var(--beam);
+  }
+  #splash .pov .l{
+    font-size:96px;line-height:1;letter-spacing:.04em;
+    padding:0 6px;border:3px solid var(--beam);
+    box-shadow:inset 0 0 0 2px #0d0a18, 0 0 16px var(--beam);
+    background:linear-gradient(#1c1834,#0d0a18);
+  }
+  #splash .pov .l:nth-child(2){ color:#fff;text-shadow:0 0 14px #fff }
+  #splash .org{
+    font-family:var(--mono);font-size:13px;font-weight:700;
+    color:#d7d3ec;letter-spacing:.36em;text-transform:uppercase;
+  }
+  #splash .sub{
+    font-family:var(--mono);font-size:10px;font-weight:700;
+    color:#6f6a8c;letter-spacing:.18em;text-transform:uppercase;
+    margin-top:-6px;
+  }
+  /* Petite "barre de chargement" rétro */
+  #splash .bar{
+    width:180px;height:8px;background:#1c1834;
+    border:2px solid;border-color:#322c52 var(--beam) var(--beam) #322c52;
+    position:relative;overflow:hidden;
+  }
+  #splash .bar::before{
+    content:"";position:absolute;left:-30%;top:0;bottom:0;width:30%;
+    background:linear-gradient(90deg,transparent,var(--beam),transparent);
+    animation:splashScan 1.2s ease-in-out infinite;
+  }
+  @keyframes splashIn{
+    from{opacity:0;transform:scale(.96)}
+    to  {opacity:1;transform:scale(1)}
+  }
+  @keyframes splashOut{
+    from{opacity:1}
+    to  {opacity:0;visibility:hidden;pointer-events:none}
+  }
+  @keyframes splashScan{
+    0%{left:-30%} 100%{left:100%}
+  }
+  /* Le splash respecte le mobile : monogramme plus petit */
+  @media(max-width:480px){
+    #splash .pov .l{ font-size:64px;padding:0 4px }
+    #splash .org{ font-size:11px;letter-spacing:.28em }
+    #splash .bar{ width:140px }
+  }
+
 </style>
 </head>
 <body>
+
+<!-- Splash : monogramme POV. Retiré du DOM après l'animation. -->
+<div id="splash" aria-hidden="true" role="presentation">
+  <div class="pov">
+    <span class="l">P</span><span class="l">O</span><span class="l">V</span>
+  </div>
+  <div class="org">People&nbsp;of&nbsp;Verso</div>
+  <div class="sub">STEP·SEQ · 1040 · YM2149</div>
+  <div class="bar"></div>
+</div>
 
 <main class="win" role="application" aria-label="Séquenceur pas-à-pas">
   <div class="titlebar">
@@ -716,10 +790,12 @@
       </div>
       <div class="chk-row">
         <label class="chk"><input type="checkbox" id="songMode">Mode song actif (Play enchaîne les patterns)</label>
+        <label class="chk"><input type="checkbox" id="songLoop">Boucle (rejouer à l'infini)</label>
       </div>
       <p>Chaque ligne joue <b>×N</b> fois sa boucle avant de passer à la
          suivante. Les patterns doivent être préalablement sauvegardés
-         dans la banque. À la fin de la liste, la lecture s'arrête.</p>
+         dans la banque. <b>Boucle</b> : la song reprend depuis le début
+         après la dernière ligne, sinon la lecture s'arrête à la fin.</p>
       <div class="msg" id="songMsg"></div>
       <div class="dlg-actions">
         <button class="btn" id="songNew">Nouveau</button>
@@ -1154,6 +1230,7 @@ TRACKS.forEach((t,i)=>{
 // chargement du dialogue et au démarrage de la lecture en mode song.
 const songState = {
   on:false,          // mode song armé ? (la lecture enchaîne)
+  loop:false,        // une fois la liste finie : recommence (true) ou stop (false)
   id:null,           // id de la song en cours d'édition (null = inédite)
   name:"SONG 01",
   items:[],          // [{patternId, repeats}]
@@ -2818,6 +2895,7 @@ async function openSong(){
   catch(e){ $("#songMsg").textContent=e.message; $("#songMsg").className="msg err"; }
   $("#songName").value=songState.name||"SONG 01";
   $("#songMode").checked=songState.on;
+  $("#songLoop").checked=songState.loop;
   songRefreshPicker();
   songRenderItems();
   show("songOverlay");
@@ -2933,6 +3011,7 @@ function songReset(){
   songState.id=null;
   songState.name="SONG 01";
   songState.items=[];
+  songState.loop=false;
 }
 
 // --- intégration au moteur de lecture ---
@@ -2952,17 +3031,22 @@ function songStartPlayback(){
 function songAdvance(){
   // Appelé à chaque wrap de pattern. Décrémente repeatLeft ; si épuisé,
   // passe à l'item suivant et charge son pattern en place. À la fin
-  // de la liste, on coupe la lecture.
+  // de la liste : on rebouche au début si songState.loop est armé,
+  // sinon on coupe la lecture.
   songState.repeatLeft--;
   if(songState.repeatLeft>0) return;
   songState.itemIdx++;
   if(songState.itemIdx>=songState.items.length){
-    songState.itemIdx=0;
-    // stop() est sûr ici : il fait clearInterval(timer), or schedule()
-    // est déjà à l'intérieur d'un tick — la prochaine itération ne se
-    // produira pas et le serveur audio finit ce qui est déjà programmé.
-    stop();
-    return;
+    if(songState.loop){
+      songState.itemIdx=0;   // -> on tombe dans le chargement plus bas
+    }else{
+      songState.itemIdx=0;
+      // stop() est sûr ici : il fait clearInterval(timer), or schedule()
+      // est déjà à l'intérieur d'un tick — la prochaine itération ne se
+      // produira pas et le serveur audio finit ce qui est déjà programmé.
+      stop();
+      return;
+    }
   }
   const it=songState.items[songState.itemIdx];
   songState.repeatLeft=it.repeats;
@@ -2983,6 +3067,7 @@ $("#songMode").onchange=e=>{
   songState.on=e.target.checked;
   $("#songBadge").hidden=!songState.on;
 };
+$("#songLoop").onchange=e=>{ songState.loop=e.target.checked; };
 $("#songSave").onclick=async()=>{
   try{ await songSave();
        $("#songMsg").textContent="Song sauvegardée";
@@ -3959,6 +4044,22 @@ refreshLabels();
 [0,7].forEach(s=>state.grid.t6[s]=state.voices.t6.pitch);                 // bass
 refreshGrid();
 initCloud().then(()=>maybeShowAccept());
+
+// Splash POV : cliquable pour dismiss immédiat, sinon disparaît tout
+// seul après ~2 s via les keyframes splashOut. On retire le node du
+// DOM à la fin pour éviter qu'il reste dans le flux (pointer-events
+// est déjà coupé par l'anim, mais le node restait visible aux SR).
+(function bootSplash(){
+  const el=document.getElementById("splash");
+  if(!el) return;
+  const dismiss=()=>{
+    el.dataset.dismiss="true";
+    setTimeout(()=>{ try{ el.remove(); }catch(_){}; }, 300);
+  };
+  el.addEventListener("click", dismiss, {once:true});
+  // Cleanup automatique après l'anim out (1.4 + 0.55 s = 1.95 s).
+  setTimeout(()=>{ try{ el.remove(); }catch(_){}; }, 2100);
+})();
 </script>
 </body>
 </html>
