@@ -18,6 +18,7 @@ livré comme une vraie web app **Go + Cloud Run + Cloud SQL Postgres**.
 - **mixer global** : gain + pan par piste, mute / solo, sauvegardé avec le pattern, appliqué en direct via un nœud `StereoPanner` par piste
 - **bibliothèque d'instruments** par utilisateur : sauvegarde / rappel de presets FM ou samples, synchronisée cloud quand on est connecté
 - **partage par email** : invite un·e ami·e sur une song — la song apparaît immédiatement dans sa banque, les patterns référencés deviennent aussi accessibles, et les deux peuvent co-éditer (last-write-wins). Email automatique via **Brevo** si configuré, sinon lien copiable.
+- **banque de beats** : 35+ presets multi-genres (rock, funk, hip-hop, trap, house, techno, drum&bass, dub, reggae, ska, ragga, jazz, bossa, samba, pop, latin, afrobeat) — chargement direct dans le séquenceur via le bouton **Beats**
 - comptes applicatifs : signup/login bcrypt + JWT maison (HS256), pas de dépendance d'auth tierce
 - sauvegarde des patterns, songs **et instruments** : **cloud** (Cloud SQL) quand on est connecté,
   **locale** (`localStorage`) sinon — l'app reste 100 % jouable hors-ligne

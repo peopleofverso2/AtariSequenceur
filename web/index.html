@@ -435,6 +435,38 @@
   }
   @keyframes rblink{0%,49%{opacity:1}50%,100%{opacity:.2}}
 
+  /* Banque de beats : groupes par genre + grille de presets */
+  .beatlist{
+    max-height:65vh;overflow-y:auto;
+    background:var(--screen);padding:8px 10px;
+    border:2px solid;border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+  }
+  .beat-genre{
+    font-size:10px;font-weight:700;color:var(--beam);
+    text-transform:uppercase;letter-spacing:.06em;
+    padding:8px 2px 4px;border-bottom:1px solid #322c52;
+    margin:6px 0 6px 0;
+  }
+  .beat-genre:first-child{margin-top:0}
+  .beat-items{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+    gap:6px;margin-bottom:6px;
+  }
+  .beat-item{
+    display:flex;justify-content:space-between;align-items:center;gap:8px;
+    padding:7px 9px;background:#1c1834;
+    border:2px solid;border-color:var(--hi) var(--sh) var(--sh) var(--hi);
+    cursor:pointer;font-family:var(--mono);text-align:left;
+  }
+  .beat-item:hover{filter:brightness(1.2)}
+  .beat-item:active{
+    border-color:var(--sh) var(--hi) var(--hi) var(--sh);
+    background:#15112a;
+  }
+  .beat-item .bn{font-size:11px;font-weight:700;color:#d7d3ec;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .beat-item .bp{font-size:9px;font-weight:700;color:#6f6a8c;flex:none}
+
   /* Mixer : rangée par piste, gain + pan + M/S */
   .mixrow{
     display:grid;
@@ -528,6 +560,7 @@
            aria-label="nom du pattern">
     <button class="btn" id="save">Save</button>
     <button class="btn" id="bank">Bank</button>
+    <button class="btn" id="beatsBtn">Beats</button>
     <button class="btn" id="songBtn">Song</button>
     <button class="btn" id="mixBtn">Mix</button>
     <button class="btn" id="voiceBtn">Voix</button>
@@ -549,6 +582,24 @@
       <div class="msg" id="bankMsg"></div>
       <div class="dlg-actions">
         <button class="btn" data-close="bankOverlay">Fermer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- dialogue : banque de beats (presets multi-genres) -->
+<div class="overlay" id="beatsOverlay">
+  <div class="dialog" style="width:min(620px,calc(100% - 32px))">
+    <div class="titlebar"><div class="title"><span>Banque de beats</span></div></div>
+    <div class="dlg-body">
+      <p style="font-size:11px;line-height:1.5;margin:0">
+        Clic = charge le preset dans le séquenceur (remplace le pattern courant).
+        Les voix retombent au kit chiptune par défaut ; tu peux les changer
+        ensuite via <b>Voix</b> ou <b>EDIT</b> sur une piste.
+      </p>
+      <div class="beatlist" id="beatsList"></div>
+      <div class="dlg-actions">
+        <button class="btn" data-close="beatsOverlay">Fermer</button>
       </div>
     </div>
   </div>
@@ -3475,6 +3526,306 @@ async function maybeShowAccept(){
   };
   show("acceptOverlay");
 }
+
+/* =================================================================
+   10.septies BANQUE DE BEATS (presets multi-genres)
+
+   35+ patterns de batterie / groove encodés en notation compacte :
+     x = pas allumé (vélocité normale)
+     X = accent (vel 127)
+     o = ghost note (vel 50)
+     . = pas éteint
+   Chaque preset cible les pistes t1..t6 (kick, snare, hat, open,
+   blip/perc, bass) qui suivent le LEGACY_ID — les autres pistes sont
+   ramenées au kit chiptune par défaut. L'utilisateur peut ensuite
+   changer les voix dans le panneau Voix.
+   ================================================================= */
+const BEAT_PRESETS = [
+  // === ROCK =========================================================
+  { genre:"Rock", name:"Rock standard",       bpm:110, len:16, res:4, tracks:{
+    t1:"x.......x.......",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Rock", name:"Half-time",           bpm:80,  len:16, res:4, tracks:{
+    t1:"x...............",
+    t2:"........x.......",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Rock", name:"Galop",               bpm:130, len:16, res:4, tracks:{
+    t1:"x.x.....x.x.....",
+    t2:"....x.......x...",
+    t3:"xxxxxxxxxxxxxxxx",
+  }},
+  { genre:"Rock", name:"Punk fast",           bpm:180, len:16, res:4, tracks:{
+    t1:"X...X...X...X...",
+    t2:"....X.......X...",
+    t3:"xxxxxxxxxxxxxxxx",
+  }},
+  { genre:"Rock", name:"Surf",                bpm:130, len:16, res:4, tracks:{
+    t1:"x...x.x.x...x.x.",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+    t4:"..............x.",
+  }},
+  { genre:"Rock", name:"Blues shuffle",       bpm:90,  swing:60, len:16, res:4, tracks:{
+    t1:"x.......x.......",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+
+  // === FUNK =========================================================
+  { genre:"Funk", name:"Funky drummer",       bpm:96,  len:16, res:4, tracks:{
+    t1:"x.x.....x.x.....",
+    t2:"....X.o.....X.o.",
+    t3:"xxxxxxxxxxxxxxxx",
+  }},
+  { genre:"Funk", name:"James Brown",         bpm:100, len:16, res:4, tracks:{
+    t1:"x...x.x...x.x...",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Funk", name:"Funk 16th",           bpm:105, len:16, res:4, tracks:{
+    t1:"x.....x...x.x...",
+    t2:"....x.......x...",
+    t3:"xxxxxxxxxxxxxxxx",
+  }},
+
+  // === HIP-HOP / TRAP / DRILL ======================================
+  { genre:"Hip-Hop", name:"Boom bap 90s",     bpm:90,  len:16, res:4, tracks:{
+    t1:"x.......x.x.....",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Hip-Hop", name:"Trap",             bpm:140, len:16, res:4, tracks:{
+    t1:"x.....x.x.x.....",
+    t2:"........x.......",
+    t3:"xxxxxxxxxxxxxxxx",
+  }},
+  { genre:"Hip-Hop", name:"Drill",            bpm:145, len:16, res:4, tracks:{
+    t1:"x.x...x.x.x.....",
+    t2:"........x.......",
+    t3:"x.x.xxx.x.x.xxx.",
+  }},
+  { genre:"Hip-Hop", name:"Lo-fi chill",      bpm:75,  swing:30, len:16, res:4, tracks:{
+    t1:"x.......x.......",
+    t2:"....o...x.......",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+
+  // === DISCO / HOUSE / TECHNO ======================================
+  { genre:"Disco", name:"Disco",              bpm:120, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"....x.......x...",
+    t3:".x.x.x.x.x.x.x.x",
+    t4:"..x...x...x...x.",
+  }},
+  { genre:"House", name:"House",              bpm:124, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"....x.......x...",
+    t3:".x.x.x.x.x.x.x.x",
+  }},
+  { genre:"House", name:"Tech house",         bpm:124, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"....x.......x...",
+    t3:".x.x.x.x.x.x.x.x",
+    t5:"..x.....x.....x.",
+  }},
+  { genre:"Techno", name:"Techno 4/4",        bpm:132, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t3:".x.x.x.x.x.x.x.x",
+    t4:"........x.......",
+    t5:"..x...x...x...x.",
+  }},
+  { genre:"Techno", name:"Acid 303",          bpm:130, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Techno", name:"Minimal",           bpm:128, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t3:".x.x.x.x.x.x.x.x",
+  }},
+
+  // === DRUM & BASS ==================================================
+  { genre:"Drum&Bass", name:"Amen break",     bpm:165, len:16, res:4, tracks:{
+    t1:"x.x.....x.x.....",
+    t2:"....x.......x.x.",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Drum&Bass", name:"Liquid",         bpm:170, len:16, res:4, tracks:{
+    t1:"x.......x.......",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+
+  // === DUB / REGGAE / SKA ==========================================
+  { genre:"Dub", name:"One drop",             bpm:75,  len:16, res:4, tracks:{
+    t1:"........X.......",
+    t2:"........X.......",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Dub", name:"Steppers",             bpm:80,  len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Dub", name:"Rockers",              bpm:80,  len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"........x.......",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Reggae", name:"Roots one drop",    bpm:75,  len:16, res:4, tracks:{
+    t1:"........X.......",
+    t2:"........X.......",
+    t5:"..x...x...x...x.",
+  }},
+  { genre:"Reggae", name:"Ska upstroke",      bpm:130, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"....x.......x...",
+    t5:"..x...x...x...x.",
+  }},
+
+  // === RAGGA / DANCEHALL ===========================================
+  { genre:"Ragga", name:"Sleng Teng",         bpm:80,  len:16, res:4, tracks:{
+    t1:"x.......x.....x.",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Ragga", name:"Diwali",             bpm:100, len:16, res:4, tracks:{
+    t2:"X.X.X...........",
+    t1:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Ragga", name:"Bam Bam",            bpm:95,  len:16, res:4, tracks:{
+    t1:"x.......x.......",
+    t2:"....X.......X...",
+    t3:"x.x.x.x.x.x.x.x.",
+    t5:"..x...x...x...x.",
+  }},
+
+  // === JAZZ =========================================================
+  { genre:"Jazz", name:"Swing 4/4",           bpm:130, swing:60, len:16, res:4, tracks:{
+    t1:"x.......x.......",
+    t2:"....o.......o...",
+    t3:"x.x.x.x.x.x.x.x.",
+    t4:"....x.......x...",
+  }},
+  { genre:"Jazz", name:"Bossa nova",          bpm:130, len:16, res:4, tracks:{
+    t1:"x.......x.x.....",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+    t5:"X.....x...x.....",
+  }},
+  { genre:"Jazz", name:"Samba",               bpm:100, len:16, res:4, tracks:{
+    t1:"x.x.x.x.x.x.x.x.",
+    t2:"......x.......x.",
+    t3:"xxxxxxxxxxxxxxxx",
+  }},
+
+  // === POP ==========================================================
+  { genre:"Pop", name:"Ballad",               bpm:70,  len:16, res:4, tracks:{
+    t1:"x.......x.......",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Pop", name:"Dance pop",            bpm:120, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"....x.......x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+
+  // === LATIN / AFRO =================================================
+  { genre:"Latin", name:"Cumbia",             bpm:95,  len:16, res:4, tracks:{
+    t1:"x.......x.......",
+    t2:"....x...x...x...",
+    t3:"x.x.x.x.x.x.x.x.",
+  }},
+  { genre:"Latin", name:"Cha-cha-cha",        bpm:125, len:16, res:4, tracks:{
+    t1:"x...x...x...x...",
+    t2:"....x...x.......",
+    t5:"x.x.x.X.x.x.x.X.",
+  }},
+  { genre:"Afro", name:"Afrobeat",            bpm:105, len:16, res:4, tracks:{
+    t1:"x.....x.x.......",
+    t2:"....x.......x...",
+    t3:"xxxxxxxxxxxxxxxx",
+    t5:"x.x.x.x.x.x.x.x.",
+  }},
+];
+
+// Convertit "x.X.o." en arrays {grid, vel} pour une piste donnée.
+function _parseHits(str, defPitch){
+  const grid=new Array(str.length).fill(0);
+  const vel =new Array(str.length).fill(VEL_NORMAL);
+  for(let i=0;i<str.length;i++){
+    const c=str[i];
+    if(c==='x'){ grid[i]=defPitch; vel[i]=VEL_NORMAL; }
+    else if(c==='X'){ grid[i]=defPitch; vel[i]=VEL_ACCENT; }
+    else if(c==='o'){ grid[i]=defPitch; vel[i]=VEL_GHOST;  }
+  }
+  return {grid, vel};
+}
+
+// Charge un preset en repassant par applyPattern : on construit un
+// snapshot synthétique. Les voix sont remises au kit chiptune par
+// défaut (LEGACY_ID) pour que les sons collent à l'esprit du preset ;
+// l'utilisateur peut ensuite changer les voix dans le panneau Voix.
+function applyBeatPreset(p){
+  const grid={}, vel={}, subdiv={}, voices={};
+  TRACKS.forEach((t,i)=>{
+    grid[t.id]   = new Array(p.len).fill(0);
+    vel[t.id]    = new Array(p.len).fill(VEL_NORMAL);
+    subdiv[t.id] = new Array(p.len).fill(1);
+    const inst = KIT[i%KIT.length];
+    voices[t.id] = {type:"builtin", inst, pitch:INST_DEFAULT_PITCH[inst]||60};
+  });
+  for(const trackId in p.tracks){
+    if(!voices[trackId]) continue;
+    const def = voices[trackId].pitch;
+    const parsed = _parseHits(p.tracks[trackId], def);
+    for(let s=0;s<Math.min(p.len, parsed.grid.length);s++){
+      grid[trackId][s] = parsed.grid[s];
+      vel[trackId][s]  = parsed.vel[s];
+    }
+  }
+  applyPattern({
+    name: p.name.toUpperCase(),
+    bpm:  p.bpm,
+    swing:p.swing||0,
+    steps:{ grid, vel, subdiv, voices,
+            length:p.len, res:p.res||4 },
+  });
+}
+
+function buildBeatsList(){
+  const list=$("#beatsList"); list.innerHTML="";
+  // Regroupe par genre dans l'ordre d'apparition.
+  const order=[];
+  const byGenre={};
+  BEAT_PRESETS.forEach(p=>{
+    if(!byGenre[p.genre]){ byGenre[p.genre]=[]; order.push(p.genre); }
+    byGenre[p.genre].push(p);
+  });
+  order.forEach(g=>{
+    const h=document.createElement("div");
+    h.className="beat-genre"; h.textContent=g;
+    list.appendChild(h);
+    const grid=document.createElement("div");
+    grid.className="beat-items";
+    byGenre[g].forEach(p=>{
+      const it=document.createElement("button");
+      it.className="beat-item";
+      const sw=p.swing?` · swing ${p.swing}`:"";
+      it.innerHTML='<span class="bn">'+escapeHtml(p.name)+'</span>'+
+                   '<span class="bp">'+p.bpm+' BPM'+escapeHtml(sw)+'</span>';
+      it.onclick=()=>{ applyBeatPreset(p); hide("beatsOverlay"); };
+      grid.appendChild(it);
+    });
+    list.appendChild(grid);
+  });
+}
+$("#beatsBtn").onclick=()=>{ buildBeatsList(); show("beatsOverlay"); };
 
 /* =================================================================
    11. DÉMARRAGE
