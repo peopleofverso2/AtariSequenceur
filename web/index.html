@@ -500,9 +500,95 @@
   }
   #tip.show{display:block}
 
-  @media(max-width:560px){
-    body{padding:6px}
-    .title span{padding:2px 8px;letter-spacing:.08em}
+  /* ===========================================================
+     RESPONSIVE — iPhone et téléphones étroits
+
+     Trois rythmes :
+       • <= 720px : densité réduite, dialogues plein écran
+       • <= 480px : iPhone portrait — cellules touch-friendly, labels
+                    raccourcis, footer compact
+       • safe-area-inset-bottom : padding pour le "home indicator"
+     =========================================================== */
+
+  /* iOS / Android : empêche le double-tap zoom et la sélection
+     intempestive sur les pads. font-size 16px sur les inputs évite
+     le zoom forcé au focus dans Safari iOS. */
+  html{ -webkit-text-size-adjust:100% }
+  body{
+    touch-action:manipulation;
+    -webkit-tap-highlight-color:rgba(0,0,0,0);
+    overscroll-behavior-y:contain;
+  }
+  input,select,textarea{ font-size:16px }
+
+  @media(max-width:720px){
+    body{ padding:8px; align-items:flex-start }
+    .win{ width:100% }
+    .toolbar,.footer{ padding:6px; gap:5px }
+    .btn{ padding:6px 9px; font-size:11px }
+    .field{ font-size:9px; gap:4px }
+    .readout{ min-width:38px; padding:2px 6px; font-size:12px }
+    input[type=range]{ width:72px }
+    /* Dialogues : largeur quasi-totale, dlg-body scrolle déjà */
+    .overlay{ padding:8px }
+    .dialog,
+    #synthEditorOverlay .dialog,
+    #beatsOverlay .dialog{
+      width:100%;
+      max-height:calc(100svh - 16px);
+    }
+    .dlg-body{ padding:10px }
+    .dlg-row label{ width:56px; font-size:9px }
+    .screen{ max-height:62svh; padding:8px }
+    .screen-wrap{ padding:6px }
+  }
+
+  @media(max-width:480px){
+    body{ padding:4px }
+    /* Titre Atari : on garde lisible mais on densifie */
+    .title span{ padding:2px 6px; font-size:9px; letter-spacing:.06em }
+    .titlebar{ padding:2px }
+    /* Toolbar empilable : on cache séparateurs et label "Vol",
+       les groupes restent fonctionnels. */
+    .toolbar .sep{ display:none }
+    .toolbar{ padding:5px; gap:4px }
+    .toolbar .field{ font-size:0; gap:2px }  /* masque le mot, garde les boutons */
+    .toolbar .field .readout{ font-size:11px }
+    .btn{ padding:7px 8px; min-height:32px }
+    /* Grille : colonne d'étiquettes réduite, cellules min 22 px pour
+       faire tenir plus de pas, hauteur 34 px (cible tactile). */
+    .matrix{ --label-w:88px }
+    .label{ padding:0 6px; height:32px }
+    .label .name{ font-size:9px }
+    .label .note{ font-size:8px }
+    .cell{ min-height:32px }
+    /* Footer : compact, bouton Login en bout */
+    .footer{ padding:5px; gap:5px;
+             padding-bottom:calc(5px + env(safe-area-inset-bottom)); }
+    #pname{ flex:1; width:auto; min-width:0; font-size:11px }
+    .status{ font-size:9px; padding:3px 6px }
+    /* Voix : rangée plus dense, on accepte un peu de scroll vertical */
+    .voicerow{ flex-wrap:wrap; gap:4px; padding:5px 6px }
+    .voicerow .gem-select{ font-size:11px; padding:3px 4px; max-width:80px }
+    .voicerow .btn{ font-size:10px; padding:4px 6px }
+    /* Mix : on retombe à des colonnes plus serrées */
+    .mixrow{
+      grid-template-columns:20px 10px 1fr 70px 70px 28px 28px;
+      padding:5px 6px; gap:4px;
+    }
+    .mixrow input[type=range]{ width:100%; height:16px }
+    /* Beats : 2 colonnes -> 1 sur très petit écran */
+    .beat-items{ grid-template-columns:1fr }
+    /* Boutons "type" de l'éditeur synthé : on garde l'horizontale */
+    .seg .kbtn{ padding:5px 6px; font-size:10px }
+    /* Knobrow : moins de pad gauche pour l'étiquette */
+    .knobrow{ grid-template-columns:62px 1fr 50px; gap:6px }
+  }
+
+  /* Très petit (≤ 360 px) — la grille est forcément scrollable */
+  @media(max-width:360px){
+    .matrix{ --label-w:74px }
+    .btn{ padding:6px 7px; font-size:10px }
   }
 </style>
 </head>
